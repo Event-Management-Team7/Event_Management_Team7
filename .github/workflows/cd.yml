@@ -23,5 +23,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/event-management-team7/event_management_team7:latest
+            ghcr.io/event-management-team7/event_management_team7:${{ github.sha }}
