@@ -1,0 +1,7 @@
+build/
+.git/
+*.db
+*.db-journal
+coverage/
+.vscode/
+.idea/
