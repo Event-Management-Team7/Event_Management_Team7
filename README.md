@@ -21,6 +21,8 @@ All software engineering specifications and architecture models are located in t
 - [Software Requirements Specification (SRS)](docs/Software%20Requirements%20Specification%20(SRS).docx)
 - [Software Architecture Document (SAD)](docs/EMRS_SAD_v1_1_UML_Aligned.pdf)
 - [System Test Plan](docs/EMRS_Test_Plan_v1_1.pdf)
+- [Sprint 1 Test Plan (EMT-20)](docs/Sprint_1_Test_Plan.md)
+- [Branch Protection & CI Quality Gates (EMT-19)](docs/BRANCH_PROTECTION.md)
 - [UML Component Diagram](docs/EMRS_component_diagram_updated.png)
 
 ![EMRS UML Component Diagram](docs/EMRS_component_diagram_updated.png)
@@ -34,10 +36,12 @@ Event_Management_Team7/
 │       ├── ci.yml                  # CI: build, unit tests, coverage, cppcheck, docker smoke test
 │       └── codeql.yml              # CodeQL security static analysis
 ├── docs/                           # Project requirements, architecture specs, test plan & diagrams
+│   ├── BRANCH_PROTECTION.md        # Branch protection rules & CI quality gate criteria
 │   ├── EMRS_SAD_v1_1_UML_Aligned.pdf
 │   ├── EMRS_Test_Plan_v1_1.pdf
 │   ├── EMRS_component_diagram_updated.png
-│   └── Software Requirements Specification (SRS).docx
+│   ├── Software Requirements Specification (SRS).docx
+│   └── Sprint_1_Test_Plan.md       # Sprint 1 test plan (EMT-11, EMT-12, EMT-14)
 ├── src/                            # Modular C++17 backend source code
 │   ├── api/                        # REST API routing & request handlers
 │   │   ├── Routes.h
@@ -67,6 +71,7 @@ Event_Management_Team7/
 │   └── main.cpp                    # Application entry point & HTTP server
 ├── tests/                          # Automated GoogleTest test suites
 │   ├── TestServer.h                # In-memory ephemeral test harness
+│   ├── test_api_event.cpp          # Event creation API & authorization test suite
 │   ├── test_api_login.cpp
 │   ├── test_api_register.cpp
 │   ├── test_auth_service.cpp
