@@ -52,3 +52,48 @@ TEST(RegisterApi, MalformedJsonReturns400) {
     EXPECT_EQ(post(s, "[1,2,3]")->status, 400);
     EXPECT_EQ(post(s, "")->status, 400);
 }
+
+TEST(RegisterApi, RejectsWeakPasswordWith400) {
+    TestServer s;
+    json body = goodBody();
+    body["password"] = "short";
+    auto res = post(s, body.dump());
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    auto j = json::parse(res->body);
+    EXPECT_TRUE(j["fields"].contains("password"));
+}
+
+TEST(RegisterApi, RejectsInvalidEmailWith400) {
+    TestServer s;
+    json body = goodBody();
+    body["email"] = "not-an-email";
+    auto res = post(s, body.dump());
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    auto j = json::parse(res->body);
+    EXPECT_TRUE(j["fields"].contains("email"));
+}
+
+TEST(RegisterApi, RejectsInvalidRoleWith400) {
+    TestServer s;
+    json body = goodBody();
+    body["role"] = "SuperAdmin";
+    auto res = post(s, body.dump());
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    auto j = json::parse(res->body);
+    EXPECT_TRUE(j["fields"].contains("role"));
+}
+
+TEST(RegisterApi, RejectsMissingRequiredFieldsWith400) {
+    TestServer s;
+    json body = {{"name", ""}, {"email", ""}, {"password", ""}};
+    auto res = post(s, body.dump());
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    auto j = json::parse(res->body);
+    EXPECT_TRUE(j["fields"].contains("name"));
+    EXPECT_TRUE(j["fields"].contains("email"));
+    EXPECT_TRUE(j["fields"].contains("password"));
+}

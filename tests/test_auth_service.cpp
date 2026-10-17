@@ -40,3 +40,26 @@ TEST(AuthService, LoginFailsWithInvalidCredentials) {
     auto res = auth.login("vaishali@test.com", "WrongPassword");
     EXPECT_EQ(res.status, emrs::LoginResult::Status::InvalidCredentials);
 }
+
+TEST(AuthService, LoginFailsWithUnknownEmail) {
+    emrs::Database db(":memory:");
+    emrs::initSchema(db);
+    emrs::UserService users(db);
+    emrs::PasswordHasher hasher(1000);
+    emrs::AuthService auth(db, users, hasher);
+
+    auto res = auth.login("nonexistent@test.com", "AnyPassword123");
+    EXPECT_EQ(res.status, emrs::LoginResult::Status::InvalidCredentials);
+    EXPECT_TRUE(res.token.empty());
+}
+
+TEST(AuthService, AuthenticateRejectsInvalidOrExpiredToken) {
+    emrs::Database db(":memory:");
+    emrs::initSchema(db);
+    emrs::UserService users(db);
+    emrs::PasswordHasher hasher(1000);
+    emrs::AuthService auth(db, users, hasher);
+
+    EXPECT_FALSE(auth.authenticate("").has_value());
+    EXPECT_FALSE(auth.authenticate("fake-token-12345").has_value());
+}

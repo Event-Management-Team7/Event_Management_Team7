@@ -41,3 +41,47 @@ TEST(Validation, ValidatesRegistrationInput) {
     EXPECT_NE(errs.find("password"), errs.end());
     EXPECT_NE(errs.find("role"), errs.end());
 }
+
+TEST(Validation, SanitizesAndTrimsInputs) {
+    EXPECT_EQ(emrs::trim("   \t  Avinash Julakatti \r\n "), "Avinash Julakatti");
+    EXPECT_EQ(emrs::trim(""), "");
+    EXPECT_EQ(emrs::trim("   "), "");
+    EXPECT_TRUE(emrs::isValidName("  Dhanraj Rathod  "));
+    EXPECT_TRUE(emrs::isValidEmail("  user@domain.com  "));
+}
+
+TEST(Validation, ValidatesRolesStrictly) {
+    EXPECT_TRUE(emrs::isValidRole("Attendee"));
+    EXPECT_TRUE(emrs::isValidRole("Organizer"));
+    EXPECT_TRUE(emrs::isValidRole("Admin"));
+    EXPECT_FALSE(emrs::isValidRole("SuperAdmin"));
+    EXPECT_FALSE(emrs::isValidRole("Guest"));
+    EXPECT_FALSE(emrs::isValidRole(""));
+}
+
+TEST(Validation, ValidatesEventInputsAndRejectsPastDates) {
+    emrs::EventInput validEvent{
+        "Future Tech Expo", "A grand exhibition", "Conference",
+        "2099-12-31T10:00", "Expo Center Hall 1", 200, 49.99
+    };
+    EXPECT_TRUE(emrs::validateEvent(validEvent).empty());
+
+    emrs::EventInput pastEvent = validEvent;
+    pastEvent.date = "2020-01-01T10:00";
+    auto pastErrs = emrs::validateEvent(pastEvent);
+    EXPECT_FALSE(pastErrs.empty());
+    EXPECT_NE(pastErrs.find("date"), pastErrs.end());
+    EXPECT_EQ(pastErrs["date"], "Event date cannot be in the past.");
+
+    emrs::EventInput invalidEvent{
+        "", "", "", "", "", -5, -10.0
+    };
+    auto errs = emrs::validateEvent(invalidEvent);
+    EXPECT_NE(errs.find("title"), errs.end());
+    EXPECT_NE(errs.find("description"), errs.end());
+    EXPECT_NE(errs.find("category"), errs.end());
+    EXPECT_NE(errs.find("date"), errs.end());
+    EXPECT_NE(errs.find("venue"), errs.end());
+    EXPECT_NE(errs.find("capacity"), errs.end());
+    EXPECT_NE(errs.find("price"), errs.end());
+}
