@@ -33,6 +33,12 @@
 
   // Forms
   const createEventForm = document.getElementById('createEventForm');
+  const eventDateInput = document.getElementById('eventDate');
+  if (eventDateInput) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    eventDateInput.min = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }
   const checkinTicketCode = document.getElementById('checkinTicketCode');
   const btnCheckInSubmit = document.getElementById('btnCheckInSubmit');
   const checkinResult = document.getElementById('checkinResult');

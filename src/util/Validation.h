@@ -14,6 +14,7 @@ bool isValidEmail(const std::string& email);      // RFC-5322 subset
 bool isValidPhone(const std::string& phone);      // 10 digits
 bool isValidPassword(const std::string& pw);      // 8-128 chars, >=1 letter & >=1 digit
 bool isValidRole(const std::string& role);        // Attendee, Organizer, Admin
+bool isPastDate(const std::string& dateStr);      // Rejects dates prior to current time
 
 struct RegistrationInput {
     std::string name;

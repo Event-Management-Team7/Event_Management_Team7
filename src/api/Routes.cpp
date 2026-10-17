@@ -200,7 +200,11 @@ void registerRoutes(httplib::Server& server, Database& db, int pbkdf2Iterations)
             return;
         }
         auto user = auth->authenticate(*token);
-        if (!user || (user->role != "Organizer" && user->role != "Admin")) {
+        if (!user) {
+            jsonResponse(res, 401, {{"error", "Invalid or expired session token"}});
+            return;
+        }
+        if (user->role != "Organizer" && user->role != "Admin") {
             jsonResponse(res, 403, {{"error", "Only organizers can create events."}});
             return;
         }

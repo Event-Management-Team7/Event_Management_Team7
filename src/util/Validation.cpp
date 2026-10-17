@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <ctime>
 #include <regex>
 
 namespace emrs {
@@ -54,6 +56,39 @@ bool isValidRole(const std::string& role) {
     return s == "Attendee" || s == "Organizer" || s == "Admin";
 }
 
+bool isPastDate(const std::string& dateStr) {
+    auto s = trim(dateStr);
+    if (s.empty()) return false;
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0;
+    int matched = std::sscanf(s.c_str(), "%d-%d-%d", &year, &month, &day);
+    if (matched < 3) return false;
+
+    auto tPos = s.find_first_of("T ");
+    if (tPos != std::string::npos) {
+        std::sscanf(s.c_str() + tPos + 1, "%d:%d", &hour, &minute);
+    } else {
+        // If only date is provided, consider it valid until end of that day
+        hour = 23;
+        minute = 59;
+    }
+
+    std::tm tm = {};
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = (tPos == std::string::npos ? 59 : 0);
+    tm.tm_isdst = -1;
+
+    std::time_t eventTime = std::mktime(&tm);
+    if (eventTime == static_cast<std::time_t>(-1)) {
+        return false;
+    }
+    std::time_t now = std::time(nullptr);
+    return eventTime < now;
+}
+
 FieldErrors validateRegistration(const RegistrationInput& in) {
     FieldErrors errs;
     if (!isValidName(in.name)) {
@@ -87,6 +122,8 @@ FieldErrors validateEvent(const EventInput& in) {
     }
     if (trim(in.date).empty()) {
         errs["date"] = "Date is required.";
+    } else if (isPastDate(in.date)) {
+        errs["date"] = "Event date cannot be in the past.";
     }
     if (trim(in.venue).empty()) {
         errs["venue"] = "Venue is required.";
