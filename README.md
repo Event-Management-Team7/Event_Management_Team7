@@ -9,6 +9,8 @@ Product Owner - Vaishali Krishnan
 
 Testing - Avinash Julakatti
 
+**Link to jira space:** https://vaishaliam313.atlassian.net/jira/software/projects/EMT/summary
+
 ## Tech stack
 - **Backend:** C++17 REST API ([cpp-httplib](https://github.com/yhirose/cpp-httplib), [nlohmann/json](https://github.com/nlohmann/json)), SQLite3
 - **Security:** PBKDF2-HMAC-SHA256 password hashing (OpenSSL), bearer token sessions, parameterized SQL queries
