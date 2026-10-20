@@ -45,13 +45,18 @@ void registerRoutes(httplib::Server& server, Database& db, int pbkdf2Iterations)
     auto tickets = std::make_shared<TicketService>(db);
 
     // Health Check
-    server.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+    // EMT-17 requires GET /health. Keep /api/health as a backward-compatible
+    // alias because the existing automated test suite expects that route too.
+    auto healthHandler = [](const httplib::Request&, httplib::Response& res) {
         jsonResponse(res, 200, {
             {"status", "ok"},
             {"app", "Event Management and Registration System (EMRS)"},
             {"version", "1.0.0"}
         });
-    });
+    };
+
+    server.Get("/health", healthHandler);
+    server.Get("/api/health", healthHandler);
 
     // Auth: Register (EMRS-F-001)
     server.Post("/api/auth/register", [users, hasher](const httplib::Request& req, httplib::Response& res) {
