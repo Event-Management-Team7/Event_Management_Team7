@@ -52,7 +52,7 @@
             <span class="user-avatar" id="userAvatar">A</span>
             <span class="user-name" id="userName">User</span>
             <span class="user-role-badge" id="userRoleBadge">Attendee</span>
-            <button class="btn-logout" id="btnLogout" title="Logout">
+            <button type="button" class="btn-logout" id="btnLogout" title="Logout" aria-label="Log out">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
             </button>
           </div>
@@ -186,55 +186,65 @@
     </main>
 
     <!-- Auth Modal -->
-    <div class="modal" id="authModal">
+    <div class="modal" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authModalTitle" aria-hidden="true">
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-dialog">
         <div class="modal-header">
-          <div class="modal-tabs">
-            <button class="modal-tab active" id="modalTabLogin">Sign In</button>
-            <button class="modal-tab" id="modalTabRegister">Create Account</button>
+          <h2 id="authModalTitle" class="visually-hidden">Sign in or create an account</h2>
+          <div class="modal-tabs" role="tablist">
+            <button type="button" class="modal-tab active" id="modalTabLogin" role="tab" aria-selected="true" aria-controls="loginForm">Sign In</button>
+            <button type="button" class="modal-tab" id="modalTabRegister" role="tab" aria-selected="false" aria-controls="registerForm">Create Account</button>
           </div>
-          <button class="modal-close" id="modalClose">&times;</button>
+          <button type="button" class="modal-close" id="modalClose" aria-label="Close dialog">&times;</button>
         </div>
 
         <div class="modal-body">
           <!-- Sign In Form -->
-          <form id="loginForm" class="auth-form active">
+          <form id="loginForm" class="auth-form active" novalidate>
+            <div class="form-error" id="loginFormError" role="alert" hidden></div>
             <div class="form-group">
               <label for="loginEmail">Email Address</label>
-              <input type="email" id="loginEmail" required placeholder="name@example.com">
+              <input type="email" id="loginEmail" name="email" required autocomplete="email" placeholder="name@example.com" aria-describedby="loginEmailError">
+              <p class="field-error" id="loginEmailError" role="alert" hidden></p>
             </div>
             <div class="form-group">
               <label for="loginPassword">Password</label>
-              <input type="password" id="loginPassword" required placeholder="••••••••">
+              <input type="password" id="loginPassword" name="password" required autocomplete="current-password" placeholder="Enter your password" aria-describedby="loginPasswordError">
+              <p class="field-error" id="loginPasswordError" role="alert" hidden></p>
             </div>
             <button type="submit" class="btn-submit" id="btnSubmitLogin">Sign In</button>
           </form>
 
           <!-- Register Form -->
-          <form id="registerForm" class="auth-form">
+          <form id="registerForm" class="auth-form" novalidate>
+            <div class="form-error" id="registerFormError" role="alert" hidden></div>
             <div class="form-group">
               <label for="regName">Full Name</label>
-              <input type="text" id="regName" required placeholder="Avinash Julakatti">
+              <input type="text" id="regName" name="name" required autocomplete="name" placeholder="Your full name" aria-describedby="regNameError">
+              <p class="field-error" id="regNameError" role="alert" hidden></p>
             </div>
             <div class="form-group">
               <label for="regEmail">Email Address</label>
-              <input type="email" id="regEmail" required placeholder="name@example.com">
+              <input type="email" id="regEmail" name="email" required autocomplete="email" placeholder="name@example.com" aria-describedby="regEmailError">
+              <p class="field-error" id="regEmailError" role="alert" hidden></p>
             </div>
             <div class="form-group">
               <label for="regPhone">Phone (10 digits)</label>
-              <input type="tel" id="regPhone" placeholder="9876543210">
+              <input type="tel" id="regPhone" name="phone" autocomplete="tel-national" inputmode="numeric" placeholder="9876543210" aria-describedby="regPhoneError">
+              <p class="field-error" id="regPhoneError" role="alert" hidden></p>
             </div>
             <div class="form-group">
               <label for="regRole">Role</label>
-              <select id="regRole">
+              <select id="regRole" name="role" aria-describedby="regRoleError">
                 <option value="Attendee">Attendee</option>
                 <option value="Organizer">Organizer</option>
               </select>
+              <p class="field-error" id="regRoleError" role="alert" hidden></p>
             </div>
             <div class="form-group">
               <label for="regPassword">Password (min 8 chars, letters &amp; numbers)</label>
-              <input type="password" id="regPassword" required placeholder="••••••••">
+              <input type="password" id="regPassword" name="password" required autocomplete="new-password" placeholder="Create a password" aria-describedby="regPasswordError">
+              <p class="field-error" id="regPasswordError" role="alert" hidden></p>
             </div>
             <button type="submit" class="btn-submit" id="btnSubmitRegister">Create Account</button>
           </form>

@@ -15,8 +15,23 @@ Testing - Avinash Julakatti
 - **Backend:** C++17 REST API ([cpp-httplib](https://github.com/yhirose/cpp-httplib), [nlohmann/json](https://github.com/nlohmann/json)), SQLite3
 - **Security:** PBKDF2-HMAC-SHA256 password hashing (OpenSSL), bearer token sessions, parameterized SQL queries
 - **Frontend:** Responsive HTML5 / CSS3 / JavaScript web client and QR check-in portal served by the backend (`web/`)
-- **Tests:** GoogleTest unit and integration test suites, gcov/gcovr coverage
+- **Tests:** GoogleTest unit and integration test suites, gcov/gcovr coverage, pytest + Playwright browser tests for the web client
 - **CI/CD:** GitHub Actions (build, test, coverage, cppcheck, CodeQL security scan, Docker build and GHCR publish)
+
+## Running the web client
+```bash
+cmake -S . -B build && cmake --build build -j
+EMRS_DB=emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=web ./build/emrs_server
+# open http://localhost:8080
+```
+
+## Running the tests
+```bash
+ctest --test-dir build --output-on-failure      # C++ unit and API tests
+pip install -r tests/frontend/requirements.txt  # one time
+playwright install chromium                     # one time
+pytest -v                                       # browser tests for web/
+```
 
 ## Documentation
 All software engineering specifications and architecture models are located in the [`docs/`](docs/) directory:

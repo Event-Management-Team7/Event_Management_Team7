@@ -48,6 +48,36 @@ jobs:
           name: coverage-report
           path: coverage/
 
+  frontend-tests:
+    name: Frontend tests (pytest + Playwright)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libssl-dev
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-cmake-deps-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-deps-
+      - name: Build server
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEMRS_BUILD_TESTS=OFF
+          cmake --build build -j"$(nproc)" --target emrs_server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/frontend/requirements.txt
+      - name: Install pytest and Playwright
+        run: |
+          pip install -r tests/frontend/requirements.txt
+          playwright install --with-deps chromium
+      - name: Run frontend tests
+        run: pytest -v
+
   static-analysis:
     name: Static analysis (cppcheck)
     runs-on: ubuntu-24.04

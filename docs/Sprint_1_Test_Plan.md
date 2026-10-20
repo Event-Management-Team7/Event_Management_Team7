@@ -14,6 +14,7 @@ Sprint 1 covers the following Jira user stories:
 - **EMT-11:** User Registration & Input Validation
 - **EMT-12:** User Login & Session Authentication
 - **EMT-14:** Event Creation & Organizer Authorization
+- **EMT-25:** Frontend registration and login pages
 
 ---
 
@@ -34,6 +35,26 @@ ctest --test-dir build --output-on-failure
 ```
 Every test case registered with `TEST(Suite, CaseName)` is automatically discovered and reported in the CI pipeline on every Pull Request.
 
+### 2.3 Frontend Browser Tests (EMT-25)
+Browser tests for the registration and login pages live in `tests/frontend/` and use pytest with Playwright (Chromium). The `server_url` fixture starts the real `emrs_server` binary on a free port with an in-memory database and serves `web/`.
+```bash
+cmake -S . -B build && cmake --build build --target emrs_server
+pip install -r tests/frontend/requirements.txt
+playwright install chromium
+pytest -v
+```
+Set `EMRS_SERVER_BIN` to use a different server binary. The `frontend-tests` job in `ci.yml` runs this on every PR.
+
+| Jira | Test ID | Description |
+| :--- | :--- | :--- |
+| **EMT-25** | `TC-FE-01`, `TC-FE-02` | Register then log in from the browser; login email is prefilled after registering |
+| **EMT-25** | `TC-FE-03` to `TC-FE-05` | Invalid input shows inline field errors without a page reload; duplicate email (409) and server `fields` errors appear under the matching input |
+| **EMT-25** | `TC-FE-06` | Submit button is disabled while the request is in flight |
+| **EMT-25** | `TC-FE-07` to `TC-FE-09` | Wrong password, empty fields and 429 lockout show inline messages |
+| **EMT-25** | `TC-FE-10` to `TC-FE-12` | Token persists across reload, logout clears it, an unreachable server or rejected token never shows a signed-in user |
+| **EMT-25** | `TC-FE-13` to `TC-FE-16` | Dialog roles, focus trap, Escape to close, autocomplete attributes, keyboard-only login |
+| **EMT-25** | `TC-FE-17` | Modal fits 360px, 768px and 1440px viewports with no horizontal scroll |
+
 ---
 
 ## 3. Test Cases Traceability Matrix (EMT-11, EMT-12, EMT-14)
@@ -41,7 +62,7 @@ Every test case registered with `TEST(Suite, CaseName)` is automatically discove
 | Jira Story | Test ID | Type | Description | Target Endpoint / Module | Expected Result |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **EMT-11** | `TC-REG-POS-01` | Positive | Register new Attendee/Organizer with valid fields | `POST /api/auth/register` | HTTP 201 Created; user object returned without passwordHash. |
-| **EMT-11** | `TC-REG-NEG-01` | Negative | Register with an already registered email | `POST /api/auth/register` | HTTP 409 Conflict; "Email is already registered". |
+| **EMT-11** | `TC-REG-NEG-01` | Negative | Register with an already registered email | `POST /api/auth/register` | HTTP 409 Conflict; "An account with this email already exists." |
 | **EMT-11** | `TC-REG-NEG-02` | Negative | Register with invalid email format (e.g. `bademail`) | `POST /api/auth/register` | HTTP 400 Bad Request; field error on `email`. |
 | **EMT-11** | `TC-REG-NEG-03` | Negative | Register with weak password (<8 chars or no numbers) | `POST /api/auth/register` | HTTP 400 Bad Request; field error on `password`. |
 | **EMT-11** | `TC-REG-NEG-04` | Negative | Register with missing required fields (empty name/email) | `POST /api/auth/register` | HTTP 400 Bad Request; field error map listing missing fields. |
@@ -50,6 +71,7 @@ Every test case registered with `TEST(Suite, CaseName)` is automatically discove
 | **EMT-12** | `TC-AUTH-POS-02` | Positive | Access protected endpoint (`/api/auth/me`) with valid token | `GET /api/auth/me` | HTTP 200 OK; returns authenticated user profile. |
 | **EMT-12** | `TC-AUTH-NEG-01` | Negative | Login with incorrect password for existing user | `POST /api/auth/login` | HTTP 401 Unauthorized; invalid credentials error. |
 | **EMT-12** | `TC-AUTH-NEG-02` | Negative | Login with unregistered email address | `POST /api/auth/login` | HTTP 401 Unauthorized; invalid credentials error. |
+| **EMT-12** | `TC-AUTH-NEG-05` | Negative | Repeated failed logins for one account (5 failures) | `POST /api/auth/login` | HTTP 429 Too Many Requests; "Too many failed attempts. Account temporarily locked." |
 | **EMT-12** | `TC-AUTH-NEG-03` | Negative | Access protected endpoint without Authorization token | `GET /api/auth/me` | HTTP 401 Unauthorized; "Missing authentication token". |
 | **EMT-12** | `TC-AUTH-NEG-04` | Negative | Access protected endpoint with invalid or expired token | `GET /api/auth/me` | HTTP 401 Unauthorized; "Invalid or expired session token". |
 | **EMT-14** | `TC-EVT-POS-01` | Positive | Organizer creates event with all required future details | `POST /api/events` | HTTP 201 Created; returns event ID; event stored with correct organizer. |
