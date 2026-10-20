@@ -72,29 +72,128 @@
     });
   });
 
-  // Modal handlers
+  // ---- Auth: validation helpers (mirror server rules in src/util/Validation.cpp) ----
+  const validators = {
+    name(v) {
+      const s = v.trim();
+      if (s.length < 2 || s.length > 60 || !/^[A-Za-z .'-]+$/.test(s)) {
+        return 'Name must be 2-60 characters and contain only letters, spaces, periods, apostrophes, or hyphens.';
+      }
+      return '';
+    },
+    email(v) {
+      const s = v.trim();
+      if (!s) return 'Email is required.';
+      if (s.length > 254 || !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(s)) {
+        return 'Please enter a valid email address.';
+      }
+      return '';
+    },
+    phone(v) {
+      const s = v.trim();
+      if (s && !/^[6-9][0-9]{9}$/.test(s)) return 'Phone must be a valid 10-digit number.';
+      return '';
+    },
+    registerPassword(v) {
+      if (v.length < 8 || v.length > 128 || !/[A-Za-z]/.test(v) || !/[0-9]/.test(v)) {
+        return 'Password must be at least 8 characters long and contain both letters and numbers.';
+      }
+      return '';
+    },
+    loginPassword(v) {
+      return v ? '' : 'Password is required.';
+    }
+  };
+
+  function setFieldError(inputId, message) {
+    const input = document.getElementById(inputId);
+    const err = document.getElementById(`${inputId}Error`);
+    if (!input || !err) return;
+    err.textContent = message || '';
+    err.hidden = !message;
+    if (message) input.setAttribute('aria-invalid', 'true');
+    else input.removeAttribute('aria-invalid');
+  }
+
+  function setFormError(formErrorId, message) {
+    const el = document.getElementById(formErrorId);
+    el.textContent = message || '';
+    el.hidden = !message;
+  }
+
+  function clearFormErrors(form, formErrorId, inputIds) {
+    setFormError(formErrorId, '');
+    inputIds.forEach((id) => setFieldError(id, ''));
+  }
+
+  function setBusy(button, busy, busyLabel) {
+    if (busy) {
+      button.dataset.label = button.textContent;
+      button.textContent = busyLabel;
+    } else if (button.dataset.label) {
+      button.textContent = button.dataset.label;
+    }
+    button.disabled = busy;
+  }
+
+  // Maps API field keys to the registration input ids
+  const REG_FIELD_IDS = { name: 'regName', email: 'regEmail', phone: 'regPhone', role: 'regRole', password: 'regPassword' };
+  const REG_INPUT_IDS = Object.values(REG_FIELD_IDS);
+  const LOGIN_INPUT_IDS = ['loginEmail', 'loginPassword'];
+
+  // ---- Auth: modal handlers (dialog semantics, focus trap, Escape to close) ----
+  let lastFocusedBeforeModal = null;
+
+  function focusableInModal() {
+    return Array.from(authModal.querySelectorAll('button, input, select, textarea, [href]'))
+      .filter((el) => !el.disabled && el.offsetParent !== null);
+  }
+
   function openModal(mode = 'login') {
+    lastFocusedBeforeModal = document.activeElement;
     authModal.classList.add('active');
+    authModal.setAttribute('aria-hidden', 'false');
     switchAuthTab(mode);
+    const first = mode === 'login' ? document.getElementById('loginEmail') : document.getElementById('regName');
+    first.focus();
   }
 
   function closeModal() {
     authModal.classList.remove('active');
+    authModal.setAttribute('aria-hidden', 'true');
+    if (lastFocusedBeforeModal && typeof lastFocusedBeforeModal.focus === 'function') {
+      lastFocusedBeforeModal.focus();
+    }
   }
 
   function switchAuthTab(mode) {
-    if (mode === 'login') {
-      modalTabLogin.classList.add('active');
-      modalTabRegister.classList.remove('active');
-      loginForm.classList.add('active');
-      registerForm.classList.remove('active');
-    } else {
-      modalTabRegister.classList.add('active');
-      modalTabLogin.classList.remove('active');
-      registerForm.classList.add('active');
-      loginForm.classList.remove('active');
-    }
+    const isLogin = mode === 'login';
+    modalTabLogin.classList.toggle('active', isLogin);
+    modalTabRegister.classList.toggle('active', !isLogin);
+    modalTabLogin.setAttribute('aria-selected', String(isLogin));
+    modalTabRegister.setAttribute('aria-selected', String(!isLogin));
+    loginForm.classList.toggle('active', isLogin);
+    registerForm.classList.toggle('active', !isLogin);
   }
+
+  authModal.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const items = focusableInModal();
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 
   btnOpenAuthModal.addEventListener('click', () => openModal('login'));
   modalClose.addEventListener('click', closeModal);
@@ -102,12 +201,21 @@
   modalTabLogin.addEventListener('click', () => switchAuthTab('login'));
   modalTabRegister.addEventListener('click', () => switchAuthTab('register'));
 
-  // Update Auth State
+  // Clear a field's error as soon as the user edits it
+  [...LOGIN_INPUT_IDS, ...REG_INPUT_IDS].forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => setFieldError(id, ''));
+  });
+
+  // ---- Auth: session state ----
+  function showSignedOut() {
+    currentUser = null;
+    userBadge.style.display = 'none';
+    btnOpenAuthModal.style.display = 'block';
+  }
+
   async function checkAuth() {
     if (!authToken) {
-      currentUser = null;
-      userBadge.style.display = 'none';
-      btnOpenAuthModal.style.display = 'block';
+      showSignedOut();
       return;
     }
     try {
@@ -123,20 +231,15 @@
         userBadge.style.display = 'flex';
         btnOpenAuthModal.style.display = 'none';
       } else {
+        // Token rejected (expired or revoked): drop it
         localStorage.removeItem('emrs_token');
         authToken = null;
-        currentUser = null;
-        userBadge.style.display = 'none';
-        btnOpenAuthModal.style.display = 'block';
+        showSignedOut();
       }
     } catch {
-      // Mock fallback if running without backend server
-      currentUser = { id: 1, name: 'Avinash Julakatti', email: 'avinash@test.com', role: 'Attendee' };
-      userName.textContent = currentUser.name;
-      userAvatar.textContent = 'A';
-      userRoleBadge.textContent = currentUser.role;
-      userBadge.style.display = 'flex';
-      btnOpenAuthModal.style.display = 'none';
+      // Server unreachable: never fake a signed-in user. Keep the token for a later retry.
+      showSignedOut();
+      showToast('Cannot reach the server. Please try again.', 'error');
     }
   }
 
@@ -153,62 +256,114 @@
     }
     localStorage.removeItem('emrs_token');
     authToken = null;
-    currentUser = null;
+    showSignedOut();
     showToast('Logged out successfully', 'info');
-    checkAuth();
   });
 
-  // Login Submit
+  // ---- Auth: login ----
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = document.getElementById('loginEmail').value;
+    clearFormErrors(loginForm, 'loginFormError', LOGIN_INPUT_IDS);
+    const email = document.getElementById('loginEmail').value.trim();
     const password = document.getElementById('loginPassword').value;
 
+    const errors = { loginEmail: validators.email(email), loginPassword: validators.loginPassword(password) };
+    const failed = Object.entries(errors).filter(([, m]) => m);
+    failed.forEach(([id, m]) => setFieldError(id, m));
+    if (failed.length) {
+      document.getElementById(failed[0][0]).focus();
+      return;
+    }
+
+    const btn = document.getElementById('btnSubmitLogin');
+    setBusy(btn, true, 'Signing in...');
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         authToken = data.token;
         localStorage.setItem('emrs_token', authToken);
+        loginForm.reset();
         showToast('Signed in successfully!', 'success');
         closeModal();
         await checkAuth();
       } else {
-        showToast(data.error || 'Login failed', 'error');
+        // Covers 401 (invalid credentials) and 429 (temporary lockout)
+        setFormError('loginFormError', data.error || 'Login failed. Please try again.');
       }
     } catch (err) {
-      showToast('Network error while signing in', 'error');
+      setFormError('loginFormError', 'Network error while signing in. Please try again.');
+    } finally {
+      setBusy(btn, false);
     }
   });
 
-  // Register Submit
+  // ---- Auth: registration ----
   registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = document.getElementById('regName').value;
-    const email = document.getElementById('regEmail').value;
-    const phone = document.getElementById('regPhone').value;
+    clearFormErrors(registerForm, 'registerFormError', REG_INPUT_IDS);
+    const name = document.getElementById('regName').value.trim();
+    const email = document.getElementById('regEmail').value.trim();
+    const phone = document.getElementById('regPhone').value.trim();
     const role = document.getElementById('regRole').value;
     const password = document.getElementById('regPassword').value;
 
+    const errors = {
+      regName: validators.name(name),
+      regEmail: validators.email(email),
+      regPhone: validators.phone(phone),
+      regPassword: validators.registerPassword(password)
+    };
+    const failed = Object.entries(errors).filter(([, m]) => m);
+    failed.forEach(([id, m]) => setFieldError(id, m));
+    if (failed.length) {
+      document.getElementById(failed[0][0]).focus();
+      return;
+    }
+
+    const btn = document.getElementById('btnSubmitRegister');
+    setBusy(btn, true, 'Creating account...');
     try {
+      const body = { name, email, role, password };
+      if (phone) body.phone = phone;
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, phone, role, password })
+        body: JSON.stringify(body)
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
+        registerForm.reset();
         showToast('Account created! Please sign in.', 'success');
         switchAuthTab('login');
+        document.getElementById('loginEmail').value = email;
+        document.getElementById('loginPassword').focus();
+      } else if (data.fields) {
+        // Server-side validation: show each message under its own field
+        let firstId = null;
+        Object.entries(data.fields).forEach(([key, msg]) => {
+          const id = REG_FIELD_IDS[key];
+          if (id) {
+            setFieldError(id, msg);
+            firstId = firstId || id;
+          }
+        });
+        if (firstId) document.getElementById(firstId).focus();
+        else setFormError('registerFormError', data.error || 'Registration failed.');
+      } else if (res.status === 409) {
+        setFieldError('regEmail', data.error || 'An account with this email already exists.');
+        document.getElementById('regEmail').focus();
       } else {
-        showToast(data.error || 'Registration failed', 'error');
+        setFormError('registerFormError', data.error || 'Registration failed. Please try again.');
       }
     } catch (err) {
-      showToast('Network error while registering', 'error');
+      setFormError('registerFormError', 'Network error while registering. Please try again.');
+    } finally {
+      setBusy(btn, false);
     }
   });
 

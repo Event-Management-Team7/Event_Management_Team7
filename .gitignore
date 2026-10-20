@@ -34,3 +34,6 @@ logs/
 # Dependencies & temporary files
 node_modules/
 .cache/
+
+__pycache__/
+.pytest_cache/
