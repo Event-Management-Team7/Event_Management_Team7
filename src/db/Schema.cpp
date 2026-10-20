@@ -30,9 +30,16 @@ void initSchema(Database& db) {
             title TEXT NOT NULL,
             description TEXT NOT NULL,
             category TEXT NOT NULL,
+
+            -- Existing field kept for compatibility with EventService.
             event_date TEXT NOT NULL,
+
+            -- EMT-18 required fields.
+            start_time TEXT NOT NULL DEFAULT '',
+            venue_type TEXT NOT NULL DEFAULT 'physical',
             venue TEXT NOT NULL,
             capacity INTEGER NOT NULL DEFAULT 50,
+            ticket_details TEXT NOT NULL DEFAULT '',
             price REAL NOT NULL DEFAULT 0.0,
             status TEXT NOT NULL DEFAULT 'active',
             created_at INTEGER NOT NULL
@@ -53,7 +60,8 @@ void initSchema(Database& db) {
     db.execute(R"(
         CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            registration_id INTEGER NOT NULL UNIQUE REFERENCES registrations(id) ON DELETE CASCADE,
+            registration_id INTEGER NOT NULL UNIQUE
+                REFERENCES registrations(id) ON DELETE CASCADE,
             ticket_code TEXT NOT NULL UNIQUE,
             qr_data TEXT NOT NULL,
             checked_in INTEGER NOT NULL DEFAULT 0,
