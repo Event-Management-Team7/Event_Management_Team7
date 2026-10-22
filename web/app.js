@@ -34,11 +34,12 @@
   // Forms
   const createEventForm = document.getElementById('createEventForm');
   const eventDateInput = document.getElementById('eventDate');
-  if (eventDateInput) {
+  function refreshEventDateMin() {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     eventDateInput.min = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
   }
+  refreshEventDateMin();
   const checkinTicketCode = document.getElementById('checkinTicketCode');
   const btnCheckInSubmit = document.getElementById('btnCheckInSubmit');
   const checkinResult = document.getElementById('checkinResult');
@@ -56,20 +57,33 @@
     }, 4000);
   }
 
-  // Tab Navigation
+  // Tab Navigation (the create-event tab is limited to Organizers and Admins, as on the API)
+  const tabCreateEvent = document.getElementById('tabCreateEvent');
+
+  function canCreateEvents() {
+    return !!currentUser && (currentUser.role === 'Organizer' || currentUser.role === 'Admin');
+  }
+
+  function activateTab(targetId) {
+    if (targetId === 'createEventTab' && !canCreateEvents()) {
+      targetId = 'eventsTab';
+    }
+    navTabs.forEach((b) => b.classList.toggle('active', b.getAttribute('data-tab') === targetId));
+    tabPanes.forEach((p) => p.classList.toggle('active', p.id === targetId));
+    if (targetId === 'myTicketsTab') loadMyTickets();
+    if (targetId === 'createEventTab') refreshEventDateMin();
+  }
+
+  // Show or hide the create-event tab for the current user; leave it if no longer allowed
+  function applyRoleVisibility() {
+    tabCreateEvent.hidden = !canCreateEvents();
+    if (!canCreateEvents() && document.getElementById('createEventTab').classList.contains('active')) {
+      activateTab('eventsTab');
+    }
+  }
+
   navTabs.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      navTabs.forEach((b) => b.classList.remove('active'));
-      tabPanes.forEach((p) => p.classList.remove('active'));
-
-      btn.classList.add('active');
-      const targetId = btn.getAttribute('data-tab');
-      document.getElementById(targetId).classList.add('active');
-
-      if (targetId === 'myTicketsTab') {
-        loadMyTickets();
-      }
-    });
+    btn.addEventListener('click', () => activateTab(btn.getAttribute('data-tab')));
   });
 
   // ---- Auth: validation helpers (mirror server rules in src/util/Validation.cpp) ----
@@ -211,6 +225,7 @@
     currentUser = null;
     userBadge.style.display = 'none';
     btnOpenAuthModal.style.display = 'block';
+    applyRoleVisibility();
   }
 
   async function checkAuth() {
@@ -230,6 +245,7 @@
         userRoleBadge.textContent = currentUser.role;
         userBadge.style.display = 'flex';
         btnOpenAuthModal.style.display = 'none';
+        applyRoleVisibility();
       } else {
         // Token rejected (expired or revoked): drop it
         localStorage.removeItem('emrs_token');
@@ -545,47 +561,162 @@
   });
 
   // Create Event Form
+  // ---- Create event (EMT-26) ----
+  // Mirrors the server rules: backend/src/util/validation.js and src/util/Validation.cpp
+  const EVENT_FIELD_IDS = {
+    title: 'eventTitle',
+    description: 'eventDescription',
+    category: 'eventCategory',
+    date: 'eventDate',
+    venue: 'eventVenue',
+    capacity: 'eventCapacity',
+    price: 'eventPrice'
+  };
+  const EVENT_INPUT_IDS = [...Object.values(EVENT_FIELD_IDS), 'eventTicketDetails'];
+  const eventSuccess = document.getElementById('createEventSuccess');
+
+  function selectedVenueType() {
+    return document.querySelector('input[name="venueType"]:checked').value;
+  }
+
+  function updateVenueFieldForType() {
+    const virtual = selectedVenueType() === 'virtual';
+    document.getElementById('eventVenueLabel').textContent = virtual ? 'Platform or meeting link *' : 'Venue *';
+    document.getElementById('eventVenue').placeholder = virtual ? 'e.g. Google Meet: https://meet.google.com/abc-defg-hij' : 'e.g. Auditorium Hall A';
+  }
+  document.querySelectorAll('input[name="venueType"]').forEach((r) => r.addEventListener('change', updateVenueFieldForType));
+
+  function validateEventInputs(v) {
+    const errors = {};
+    if (!v.title.trim() || v.title.length > 120) errors.eventTitle = 'Title is required (maximum 120 characters).';
+    if (!v.description.trim()) errors.eventDescription = 'Description is required.';
+    if (!v.category) errors.eventCategory = 'Please select a category.';
+    if (!v.date) {
+      errors.eventDate = 'Date and time are required.';
+    } else if (Number.isNaN(new Date(v.date).getTime())) {
+      errors.eventDate = 'Please enter a valid date and time.';
+    } else if (new Date(v.date).getTime() < Date.now()) {
+      errors.eventDate = 'Event date cannot be in the past.';
+    }
+    if (!v.venue.trim()) {
+      errors.eventVenue = v.venueType === 'virtual' ? 'Platform or meeting link is required.' : 'Venue is required.';
+    }
+    if (!Number.isInteger(v.capacity) || v.capacity <= 0) errors.eventCapacity = 'Capacity must be a whole number greater than zero.';
+    if (!Number.isFinite(v.price) || v.price < 0) errors.eventPrice = 'Price cannot be negative.';
+    return errors;
+  }
+
+  function hideEventSuccess() {
+    eventSuccess.hidden = true;
+  }
+
+  EVENT_INPUT_IDS.forEach((id) => {
+    document.getElementById(id).addEventListener('input', () => setFieldError(id, ''));
+    document.getElementById(id).addEventListener('change', () => setFieldError(id, ''));
+  });
+
   createEventForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!currentUser || currentUser.role !== 'Organizer') {
+    clearFormErrors(createEventForm, 'createEventFormError', EVENT_INPUT_IDS);
+    hideEventSuccess();
+
+    if (!canCreateEvents()) {
       showToast('Only organizers can create new events.', 'error');
+      activateTab('eventsTab');
       return;
     }
 
-    const payload = {
+    const venueType = selectedVenueType();
+    const values = {
       title: document.getElementById('eventTitle').value,
+      description: document.getElementById('eventDescription').value,
       category: document.getElementById('eventCategory').value,
       date: document.getElementById('eventDate').value,
+      venueType,
       venue: document.getElementById('eventVenue').value,
-      capacity: parseInt(document.getElementById('eventCapacity').value, 10),
-      price: parseFloat(document.getElementById('eventPrice').value) || 0,
-      description: document.getElementById('eventDescription').value
+      capacity: Number(document.getElementById('eventCapacity').value),
+      price: document.getElementById('eventPrice').value === '' ? 0 : Number(document.getElementById('eventPrice').value),
+      ticketDetails: document.getElementById('eventTicketDetails').value.trim()
     };
 
+    const errors = validateEventInputs(values);
+    const failed = Object.entries(errors);
+    failed.forEach(([id, m]) => setFieldError(id, m));
+    if (failed.length) {
+      document.getElementById(failed[0][0]).focus();
+      return;
+    }
+
+    // The API stores one venue string and one description. Venue type and ticket details are
+    // encoded into them so they are persisted without a backend schema change.
+    const venue = venueType === 'virtual' ? `Virtual: ${values.venue.trim()}` : values.venue.trim();
+    const description = values.ticketDetails
+      ? `${values.description.trim()}\n\nTicket details: ${values.ticketDetails}`
+      : values.description.trim();
+    const payload = {
+      title: values.title.trim(),
+      description,
+      category: values.category,
+      date: values.date,
+      venue,
+      capacity: values.capacity,
+      price: values.price
+    };
+
+    const btn = document.getElementById('btnSubmitEvent');
+    setBusy(btn, true, 'Publishing...');
     try {
       const res = await fetch('/api/events', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showToast('Event published successfully!', 'success');
         createEventForm.reset();
-        document.getElementById('tabBrowseEvents').click();
+        updateVenueFieldForType();
+        document.getElementById('createEventSuccessTitle').textContent = 'Event created';
+        document.getElementById('createEventSuccessText').textContent =
+          `"${payload.title}" is now published (event #${data.eventId}).`;
+        eventSuccess.hidden = false;
+        eventSuccess.focus();
+        showToast('Event published successfully!', 'success');
         loadEvents();
+      } else if (data.fields) {
+        let firstId = null;
+        Object.entries(data.fields).forEach(([key, msg]) => {
+          const id = EVENT_FIELD_IDS[key];
+          if (id) {
+            setFieldError(id, msg);
+            firstId = firstId || id;
+          }
+        });
+        if (firstId) document.getElementById(firstId).focus();
+        else setFormError('createEventFormError', data.error || 'Failed to create event.');
+      } else if (res.status === 401 || res.status === 403) {
+        setFormError('createEventFormError', data.error || 'You are not allowed to create events.');
+        if (res.status === 401) {
+          localStorage.removeItem('emrs_token');
+          authToken = null;
+          showSignedOut();
+        }
       } else {
-        showToast(data.error || 'Failed to create event', 'error');
+        setFormError('createEventFormError', data.error || 'Failed to create event. Please try again.');
       }
     } catch {
-      showToast('Event published (simulation)!', 'success');
-      createEventForm.reset();
-      document.getElementById('tabBrowseEvents').click();
+      // Never report success when the server was not reached
+      setFormError('createEventFormError', 'Network error while publishing the event. Please try again.');
+    } finally {
+      setBusy(btn, false);
     }
   });
+
+  document.getElementById('btnCreateAnother').addEventListener('click', () => {
+    hideEventSuccess();
+    document.getElementById('eventTitle').focus();
+  });
+  document.getElementById('btnViewEvents').addEventListener('click', () => activateTab('eventsTab'));
+
 
   // Load My Tickets
   async function loadMyTickets() {

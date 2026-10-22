@@ -15,6 +15,7 @@ Sprint 1 covers the following Jira user stories:
 - **EMT-12:** User Login & Session Authentication
 - **EMT-14:** Event Creation & Organizer Authorization
 - **EMT-25:** Frontend registration and login pages
+- **EMT-26:** Frontend organizer create-event form
 
 ---
 
@@ -54,6 +55,13 @@ Set `EMRS_SERVER_BIN` to use a different server binary. The `frontend-tests` job
 | **EMT-25** | `TC-FE-10` to `TC-FE-12` | Token persists across reload, logout clears it, an unreachable server or rejected token never shows a signed-in user |
 | **EMT-25** | `TC-FE-13` to `TC-FE-16` | Dialog roles, focus trap, Escape to close, autocomplete attributes, keyboard-only login |
 | **EMT-25** | `TC-FE-17` | Modal fits 360px, 768px and 1440px viewports with no horizontal scroll |
+| **EMT-26** | `TC-EVT-FE-01` to `TC-EVT-FE-04` | Create-event tab and form are hidden from logged-out users and attendees, visible to organizers, and closed on logout |
+| **EMT-26** | `TC-EVT-FE-05` to `TC-EVT-FE-08` | Organizer creates an event end to end; virtual venue and ticket details are saved; empty price means free; confirmation and "create another" |
+| **EMT-26** | `TC-EVT-FE-09` to `TC-EVT-FE-11` | Required fields and invalid values (past date, capacity, negative price) are flagged inline before submit with no API call; errors clear on edit |
+| **EMT-26** | `TC-EVT-FE-12` to `TC-EVT-FE-15` | Server field errors shown inline after submit; network failure never reports success; no double submit; expired session signs the user out |
+| **EMT-26** | `TC-EVT-FE-16`, `TC-EVT-FE-17` | Labelled controls; form fits 360px, 768px and 1440px viewports |
+
+Note: the API stores a single `venue` string and `description`, so the form saves a virtual venue as `Virtual: <platform or link>` and appends ticket details to the description as `Ticket details: ...`.
 
 ---
 
