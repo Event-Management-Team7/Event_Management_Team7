@@ -33,7 +33,7 @@
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             Browse Events
           </button>
-          <button class="nav-btn" data-tab="createEventTab" id="tabCreateEvent">
+          <button class="nav-btn" data-tab="createEventTab" id="tabCreateEvent" hidden>
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             Create Event
           </button>
@@ -97,51 +97,88 @@
       </section>
 
       <!-- Create Event Tab -->
-      <section class="tab-pane" id="createEventTab">
+      <section class="tab-pane" id="createEventTab" aria-labelledby="createEventHeading">
         <div class="form-container">
           <div class="form-header">
-            <h2>Create New Event</h2>
-            <p>Fill out the details below to publish an event on the platform.</p>
+            <h2 id="createEventHeading">Create New Event</h2>
+            <p>Fill out the details below to publish an event on the platform. Fields marked * are required.</p>
           </div>
-          <form id="createEventForm" class="styled-form">
+
+          <div class="form-success" id="createEventSuccess" role="status" tabindex="-1" hidden>
+            <strong id="createEventSuccessTitle">Event created</strong>
+            <p id="createEventSuccessText"></p>
+            <div class="form-success-actions">
+              <button type="button" class="btn-secondary" id="btnCreateAnother">Create another event</button>
+              <button type="button" class="btn-secondary" id="btnViewEvents">View all events</button>
+            </div>
+          </div>
+
+          <form id="createEventForm" class="styled-form" novalidate>
+            <div class="form-error" id="createEventFormError" role="alert" hidden></div>
+
             <div class="form-group">
               <label for="eventTitle">Event Title *</label>
-              <input type="text" id="eventTitle" required placeholder="e.g. National Hackathon 2026">
+              <input type="text" id="eventTitle" name="title" maxlength="120" required placeholder="e.g. National Hackathon 2026" aria-describedby="eventTitleError">
+              <p class="field-error" id="eventTitleError" role="alert" hidden></p>
             </div>
+
+            <div class="form-group">
+              <label for="eventDescription">Description *</label>
+              <textarea id="eventDescription" name="description" rows="4" required placeholder="Provide an overview, speaker line-up, and registration rules..." aria-describedby="eventDescriptionError"></textarea>
+              <p class="field-error" id="eventDescriptionError" role="alert" hidden></p>
+            </div>
+
             <div class="form-row">
               <div class="form-group">
                 <label for="eventCategory">Category *</label>
-                <select id="eventCategory" required>
+                <select id="eventCategory" name="category" required aria-describedby="eventCategoryError">
+                  <option value="">Select a category</option>
                   <option value="Conference">Conference</option>
                   <option value="Workshop">Workshop</option>
                   <option value="Technical">Technical</option>
                   <option value="Cultural">Cultural</option>
                   <option value="Sports">Sports</option>
                 </select>
+                <p class="field-error" id="eventCategoryError" role="alert" hidden></p>
               </div>
               <div class="form-group">
                 <label for="eventDate">Date &amp; Time *</label>
-                <input type="datetime-local" id="eventDate" required>
+                <input type="datetime-local" id="eventDate" name="date" required aria-describedby="eventDateError">
+                <p class="field-error" id="eventDateError" role="alert" hidden></p>
               </div>
             </div>
+
+            <fieldset class="form-group venue-type">
+              <legend>Venue type *</legend>
+              <label class="radio-option"><input type="radio" name="venueType" id="venueTypePhysical" value="physical" checked> Physical</label>
+              <label class="radio-option"><input type="radio" name="venueType" id="venueTypeVirtual" value="virtual"> Virtual</label>
+            </fieldset>
+
+            <div class="form-group">
+              <label for="eventVenue" id="eventVenueLabel">Venue *</label>
+              <input type="text" id="eventVenue" name="venue" maxlength="200" required placeholder="e.g. Auditorium Hall A" aria-describedby="eventVenueError">
+              <p class="field-error" id="eventVenueError" role="alert" hidden></p>
+            </div>
+
             <div class="form-row">
               <div class="form-group">
-                <label for="eventVenue">Venue / Platform *</label>
-                <input type="text" id="eventVenue" required placeholder="e.g. Auditorium Hall A or Online Meet">
+                <label for="eventCapacity">Max Capacity *</label>
+                <input type="number" id="eventCapacity" name="capacity" min="1" step="1" value="50" required inputmode="numeric" aria-describedby="eventCapacityError">
+                <p class="field-error" id="eventCapacityError" role="alert" hidden></p>
               </div>
               <div class="form-group">
-                <label for="eventCapacity">Max Capacity *</label>
-                <input type="number" id="eventCapacity" min="1" value="50" required>
+                <label for="eventPrice">Ticket Price (INR, 0 for free)</label>
+                <input type="number" id="eventPrice" name="price" min="0" step="1" value="0" inputmode="decimal" aria-describedby="eventPriceError">
+                <p class="field-error" id="eventPriceError" role="alert" hidden></p>
               </div>
             </div>
+
             <div class="form-group">
-              <label for="eventPrice">Ticket Price (INR / Simulated)</label>
-              <input type="number" id="eventPrice" min="0" step="1" value="0">
+              <label for="eventTicketDetails">Ticket details (optional)</label>
+              <textarea id="eventTicketDetails" name="ticketDetails" rows="2" placeholder="e.g. Includes lunch and a certificate. Student ID required at entry." aria-describedby="eventTicketDetailsError"></textarea>
+              <p class="field-error" id="eventTicketDetailsError" role="alert" hidden></p>
             </div>
-            <div class="form-group">
-              <label for="eventDescription">Description *</label>
-              <textarea id="eventDescription" rows="4" required placeholder="Provide an overview, speaker line-up, and registration rules..."></textarea>
-            </div>
+
             <button type="submit" class="btn-submit" id="btnSubmitEvent">Publish Event</button>
           </form>
         </div>

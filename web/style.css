@@ -865,3 +865,86 @@ body {
   .form-group input,
   .form-group select { font-size: 1rem; } /* avoids iOS zoom on focus */
 }
+
+/* ---- Create event form (EMT-26) ---- */
+.nav-btn[hidden] {
+  display: none;
+}
+
+.venue-type {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  align-items: center;
+}
+
+.venue-type legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.radio-option input {
+  width: auto;
+  margin: 0;
+}
+
+.form-group textarea[aria-invalid="true"],
+.form-group select[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.form-success {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid #22c55e;
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.form-success p {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.form-success[hidden] {
+  display: none;
+}
+
+.form-success-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: inherit;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus-visible {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.form-group textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
