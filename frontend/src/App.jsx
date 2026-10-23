@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, clearToken, getToken, saveToken } from './api.js';
 
-const CATEGORIES = ['Conference', 'Workshop', 'Technical', 'Cultural', 'Sports'];
+const CATEGORIES = ['Conference', 'Workshop', 'Concert', 'Sports', 'Networking', 'Other'];
 const PRIVILEGED_ROLES = ['Organizer', 'Admin'];
 
 function formatDate(date) {
@@ -89,13 +89,14 @@ function EventCard({ event, user, onRegister, onCancel }) {
       </dl>
       <div className="actions">
         {user && <button className="primary" type="button" onClick={() => onRegister(event)}>Register / waitlist</button>}
-        {canManage && event.status === 'active' && <button className="danger" type="button" onClick={() => onCancel(event)}>Cancel event</button>}
+        {canManage && ['active', 'Upcoming'].includes(event.status) && <button className="danger" type="button" onClick={() => onCancel(event)}>Cancel event</button>}
       </div>
     </article>
   );
 }
 
 function EventForm({ onCreate, busy }) {
+  const [venueType, setVenueType] = useState('Physical');
   return (
     <form className="card form-grid" onSubmit={(event) => {
       event.preventDefault();
@@ -104,24 +105,42 @@ function EventForm({ onCreate, busy }) {
         title: form.get('title'),
         description: form.get('description'),
         category: form.get('category'),
-        date: form.get('date'),
-        venue: form.get('venue'),
+        startDateTime: form.get('startDateTime'),
+        endDateTime: form.get('endDateTime'),
+        venueType,
+        address: venueType === 'Physical' ? form.get('address') : '',
+        meetingLink: venueType === 'Virtual' ? form.get('meetingLink') : '',
         capacity: Number(form.get('capacity')),
-        price: Number(form.get('price') || 0)
+        ticketTypes: [{ name: form.get('ticketName'), price: Number(form.get('ticketPrice') || 0) }],
+        currency: form.get('currency'),
+        tags: String(form.get('tags') || '').split(',').map((tag) => tag.trim()).filter(Boolean)
       }, event.currentTarget);
     }}>
       <h2>Create event</h2>
-      <label>Title<input name="title" required maxLength="120" /></label>
+      <label>Title<input name="title" required minLength="3" maxLength="100" /></label>
       <div className="form-row">
         <label>Category<select name="category">{CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
-        <label>Date and time<input name="date" type="datetime-local" required /></label>
+        <label>Venue type<select name="venueType" value={venueType} onChange={(event) => setVenueType(event.target.value)}><option>Physical</option><option>Virtual</option></select></label>
       </div>
       <div className="form-row">
-        <label>Venue<input name="venue" required /></label>
+        <label>Start date and time<input name="startDateTime" type="datetime-local" required /></label>
+        <label>End date and time<input name="endDateTime" type="datetime-local" required /></label>
+      </div>
+      <div className="form-row">
+        {venueType === 'Physical'
+          ? <label>Venue / address<input name="address" required minLength="3" maxLength="200" /></label>
+          : <label>HTTPS meeting link<input name="meetingLink" type="url" required placeholder="https://..." /></label>}
         <label>Capacity<input name="capacity" type="number" min="1" defaultValue="50" required /></label>
       </div>
-      <label>Price<input name="price" type="number" min="0" step="0.01" defaultValue="0" /></label>
-      <label>Description<textarea name="description" rows="4" required /></label>
+      <div className="form-row">
+        <label>Ticket type name<input name="ticketName" required maxLength="50" defaultValue="General Admission" /></label>
+        <label>Ticket price<input name="ticketPrice" type="number" min="0" step="0.01" defaultValue="0" required /></label>
+      </div>
+      <div className="form-row">
+        <label>Currency<input name="currency" defaultValue="INR" /></label>
+        <label>Tags (comma-separated)<input name="tags" placeholder="community, learning" /></label>
+      </div>
+      <label>Description<textarea name="description" rows="4" required maxLength="2000" /></label>
       <button className="primary" type="submit" disabled={busy}>{busy ? 'Publishing…' : 'Publish event'}</button>
     </form>
   );
@@ -161,6 +180,7 @@ export default function App() {
   const [notice, setNotice] = useState('');
 
   const canOrganize = Boolean(user && PRIVILEGED_ROLES.includes(user.role));
+  const canCreate = Boolean(user && user.role === 'Organizer');
   const dismissMessages = useCallback(() => {
     setError('');
     setNotice('');
@@ -332,7 +352,7 @@ export default function App() {
         </a>
         <nav aria-label="Main navigation">
           <button className={tab === 'events' ? 'active' : ''} onClick={() => setTab('events')}>Events</button>
-          {canOrganize && <button className={tab === 'create' ? 'active' : ''} onClick={() => setTab('create')}>Create event</button>}
+          {canCreate && <button className={tab === 'create' ? 'active' : ''} onClick={() => setTab('create')}>Create event</button>}
           {canOrganize && <button className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>My events</button>}
           {user && <button className={tab === 'registrations' ? 'active' : ''} onClick={() => { setTab('registrations'); refreshPrivateData(); }}>My registrations</button>}
           {canOrganize && <button className={tab === 'checkin' ? 'active' : ''} onClick={() => setTab('checkin')}>Check-in</button>}
@@ -378,7 +398,7 @@ export default function App() {
           </section>
         )}
 
-        {tab === 'create' && canOrganize && <EventForm onCreate={createEvent} busy={busy} />}
+        {tab === 'create' && canCreate && <EventForm onCreate={createEvent} busy={busy} />}
 
         {tab === 'mine' && canOrganize && (
           <section>

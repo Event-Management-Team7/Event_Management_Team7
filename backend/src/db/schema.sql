@@ -28,7 +28,12 @@ CREATE TABLE IF NOT EXISTS events (
     ticket_details TEXT NOT NULL DEFAULT '',
     price REAL NOT NULL DEFAULT 0.0,
     status TEXT NOT NULL DEFAULT 'active',
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    start_datetime TEXT NOT NULL DEFAULT '',
+    end_datetime TEXT NOT NULL DEFAULT '',
+    meeting_link TEXT NOT NULL DEFAULT '',
+    currency TEXT NOT NULL DEFAULT 'INR',
+    tags TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS registrations (

@@ -10,10 +10,12 @@ const VALID_EVENT = {
   title: 'Future Workshop',
   description: 'A practical workshop.',
   category: 'Workshop',
-  date: '2099-11-20T10:00',
-  venue: 'Hall A',
+  startDateTime: '2099-11-20T10:00',
+  endDateTime: '2099-11-20T12:00',
+  venueType: 'Physical',
+  address: 'Hall A',
   capacity: 1,
-  price: 15.5
+  ticketTypes: [{ name: 'General Admission', price: 15.5 }]
 };
 
 function setup() {
@@ -157,6 +159,7 @@ test('event creation enforces authorization and validation; public list supports
   const forbidden = await createEvent(app, attendee.token);
   assert.equal(forbidden.status, 403);
   assert.equal(forbidden.body.error, 'Only organizers can create events.');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM events').count, 0);
 
   const organizer = await createUser(app, { email: 'organizer@example.test' });
   db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
@@ -168,18 +171,21 @@ test('event creation enforces authorization and validation; public list supports
     title: '',
     description: '',
     category: '',
-    date: '2020-01-01T10:00',
-    venue: '',
+    startDateTime: '2020-01-01T10:00',
+    endDateTime: '2019-01-01T10:00',
+    venueType: 'Physical',
+    address: '',
     capacity: 0,
-    price: -1
+    ticketTypes: []
   });
   assert.equal(invalid.status, 400);
   assert.deepEqual(Object.keys(invalid.body.fields).sort(), [
     'capacity',
     'category',
-    'date',
     'description',
-    'price',
+    'endDateTime',
+    'startDateTime',
+    'ticketTypes',
     'title',
     'venue'
   ]);
@@ -189,8 +195,199 @@ test('event creation enforces authorization and validation; public list supports
   assert.equal(filtered.body.events.length, 1);
   assert.equal(filtered.body.events[0].organizerId, organizer.user.id);
   assert.equal((await request(app).get(`/api/events/${created.body.eventId}`)).body.event.title, 'Future Workshop');
+  assert.equal((await request(app).get(`/api/events/${created.body.eventId}`)).body.event.status, 'Upcoming');
   assert.equal((await request(app).get('/api/events/mine').set('Authorization', `Bearer ${organizer.token}`)).body.events.length, 1);
   assert.equal((await request(app).get('/api/events/99999')).status, 404);
+});
+
+test('event creation trims title and returns the complete persisted EMT-14 event', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'emt14-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const submitted = {
+    ...VALID_EVENT,
+    title: '  Launch Workshop  ',
+    endDateTime: '2099-11-20T13:30',
+    ticketTypes: [
+      { name: 'Standard', price: 0, quantity: 1 }
+    ],
+    currency: 'INR',
+    tags: ['education', 'community']
+  };
+  const created = await createEvent(app, organizer.token, submitted);
+  assert.equal(created.status, 201, created.text);
+  const response = await request(app).get(`/api/events/${created.body.eventId}`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.event, {
+    id: created.body.eventId,
+    organizerId: organizer.user.id,
+    title: 'Launch Workshop',
+    description: submitted.description,
+    category: submitted.category,
+    date: submitted.startDateTime,
+    startDateTime: submitted.startDateTime,
+    endDateTime: submitted.endDateTime,
+    venueType: submitted.venueType,
+    venue: submitted.address,
+    address: submitted.address,
+    meetingLink: '',
+    capacity: submitted.capacity,
+    price: 0,
+    ticketTypes: submitted.ticketTypes,
+    currency: submitted.currency,
+    tags: submitted.tags,
+    registeredCount: 0,
+    status: 'Upcoming'
+  });
+});
+
+test('event creation reports every missing required field', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'missing-fields@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const response = await createEvent(app, organizer.token, {
+    title: ' ',
+    description: '',
+    category: '',
+    startDateTime: '',
+    endDateTime: '',
+    venueType: '',
+    address: '',
+    capacity: '',
+    ticketTypes: []
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(Object.keys(response.body.fields).sort(), [
+    'capacity',
+    'category',
+    'description',
+    'endDateTime',
+    'startDateTime',
+    'ticketTypes',
+    'title',
+    'venueType'
+  ]);
+});
+
+test('physical venues require an address and virtual venues require a valid HTTPS link', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'venue-rules@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+
+  const physical = await createEvent(app, organizer.token, { address: '  ' });
+  assert.equal(physical.status, 400);
+  assert.ok(physical.body.fields.venue);
+
+  const missingLink = await createEvent(app, organizer.token, {
+    venueType: 'Virtual',
+    address: '',
+    meetingLink: ''
+  });
+  assert.equal(missingLink.status, 400);
+  assert.ok(missingLink.body.fields.meetingLink);
+
+  for (const meetingLink of ['http://meet.example.test/room', 'not a url']) {
+    const invalidLink = await createEvent(app, organizer.token, {
+      venueType: 'Virtual',
+      address: '',
+      meetingLink
+    });
+    assert.equal(invalidLink.status, 400);
+    assert.ok(invalidLink.body.fields.meetingLink);
+  }
+
+  const virtual = await createEvent(app, organizer.token, {
+    venueType: 'Virtual',
+    address: '',
+    meetingLink: 'https://meet.example.test/room'
+  });
+  assert.equal(virtual.status, 201, virtual.text);
+  const event = (await request(app).get(`/api/events/${virtual.body.eventId}`)).body.event;
+  assert.equal(event.venueType, 'Virtual');
+  assert.equal(event.address, '');
+  assert.equal(event.meetingLink, 'https://meet.example.test/room');
+});
+
+test('event dates reject invalid, past, and non-increasing ranges', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'date-rules@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+
+  for (const startDateTime of ['2020-01-01T10:00', '2099-02-30T10:00', 'not-a-date']) {
+    const response = await createEvent(app, organizer.token, { startDateTime });
+    assert.equal(response.status, 400);
+    assert.ok(response.body.fields.startDateTime);
+  }
+  for (const endDateTime of ['2099-11-20T10:00', '2099-11-20T09:59']) {
+    const response = await createEvent(app, organizer.token, { endDateTime });
+    assert.equal(response.status, 400);
+    assert.ok(response.body.fields.endDateTime);
+  }
+});
+
+test('capacity must be an integer between 1 and 100000', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'capacity-rules@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+
+  for (const capacity of [0, -1, 1.5, '10', 100001]) {
+    const response = await createEvent(app, organizer.token, { capacity });
+    assert.equal(response.status, 400, `capacity ${JSON.stringify(capacity)} should be rejected`);
+    assert.ok(response.body.fields.capacity);
+  }
+});
+
+test('ticket types require non-negative prices with at most two decimals and quantities within capacity', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'ticket-rules@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+
+  for (const ticketTypes of [[], [{ name: 'General', price: -1 }], [{ name: 'General', price: 1.001 }]]) {
+    const response = await createEvent(app, organizer.token, { ticketTypes });
+    assert.equal(response.status, 400);
+    assert.ok(response.body.fields.ticketTypes || Object.keys(response.body.fields).some((key) => key.startsWith('ticketTypes.')));
+  }
+
+  const excessiveQuantity = await createEvent(app, organizer.token, {
+    capacity: 5,
+    ticketTypes: [{ name: 'General', price: 10, quantity: 6 }]
+  });
+  assert.equal(excessiveQuantity.status, 400);
+  assert.ok(excessiveQuantity.body.fields.ticketTypes);
+
+  const free = await createEvent(app, organizer.token, { ticketTypes: [{ name: 'Free', price: 0 }] });
+  assert.equal(free.status, 201, free.text);
+  const event = (await request(app).get(`/api/events/${free.body.eventId}`)).body.event;
+  assert.equal(event.ticketTypes[0].price, 0);
+  assert.equal(event.ticketTypes[0].quantity, VALID_EVENT.capacity);
+  assert.equal(event.currency, 'INR');
+});
+
+test('admin, missing, invalid, and expired credentials cannot create events', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const admin = await createUser(app, { email: 'event-admin@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Admin', admin.user.id]);
+  const adminAttempt = await createEvent(app, admin.token);
+  assert.equal(adminAttempt.status, 403);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM events').count, 0);
+
+  assert.equal((await request(app).post('/api/events').send(VALID_EVENT)).status, 401);
+  assert.equal((await request(app).post('/api/events').set('Authorization', 'Bearer invalid').send(VALID_EVENT)).status, 401);
+  db.run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', [
+    'expired-event-token',
+    admin.user.id,
+    FIXED_NOW - 1
+  ]);
+  assert.equal((await request(app).post('/api/events')
+    .set('Authorization', 'Bearer expired-event-token')
+    .send(VALID_EVENT)).status, 401);
 });
 
 test('registration confirms up to capacity, then waitlists and rejects duplicates', async (t) => {
