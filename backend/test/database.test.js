@@ -35,6 +35,11 @@ test('creates the six application tables and required event columns', () => {
       'venue',
       'capacity',
       'ticket_details',
+      'start_datetime',
+      'end_datetime',
+      'meeting_link',
+      'currency',
+      'tags',
       'price',
       'status',
       'created_at'
@@ -123,7 +128,7 @@ test('adds missing event columns to an existing database without losing data', (
         ticket_details: ''
       });
       assert.equal(db.get('SELECT password_hash FROM users WHERE id = 1').password_hash, 'existing-hash');
-      assert.equal(db.get('PRAGMA user_version').user_version, 1);
+      assert.equal(db.get('PRAGMA user_version').user_version, 2);
     } finally {
       db.close();
     }

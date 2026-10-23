@@ -3,11 +3,16 @@ import { fileURLToPath } from 'node:url';
 
 const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
 const schemaSql = readFileSync(schemaPath, 'utf8');
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 const EVENT_COLUMNS = new Map([
   ['start_time', "TEXT NOT NULL DEFAULT ''"],
   ['venue_type', "TEXT NOT NULL DEFAULT 'physical'"],
-  ['ticket_details', "TEXT NOT NULL DEFAULT ''"]
+  ['ticket_details', "TEXT NOT NULL DEFAULT ''"],
+  ['start_datetime', "TEXT NOT NULL DEFAULT ''"],
+  ['end_datetime', "TEXT NOT NULL DEFAULT ''"],
+  ['meeting_link', "TEXT NOT NULL DEFAULT ''"],
+  ['currency', "TEXT NOT NULL DEFAULT 'INR'"],
+  ['tags', "TEXT NOT NULL DEFAULT '[]'"]
 ]);
 
 export function migrate(db) {

@@ -9,6 +9,14 @@ function eventRole(req, res, next) {
   next();
 }
 
+function organizerOnly(req, res, next) {
+  if (req.user.role !== 'Organizer') {
+    res.status(403).json({ error: 'Only organizers can create events.' });
+    return;
+  }
+  next();
+}
+
 export function createEventsRouter({ authentication, eventService, registrationService }) {
   const router = Router();
 
@@ -25,7 +33,7 @@ export function createEventsRouter({ authentication, eventService, registrationS
     res.status(200).json({ events: eventService.listOrganizer(req.user.id) });
   });
 
-  router.post('/', authentication.authenticate, eventRole, (req, res, next) => {
+  router.post('/', authentication.authenticate, organizerOnly, (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -35,15 +43,21 @@ export function createEventsRouter({ authentication, eventService, registrationS
       return;
     }
     const input = {
-      title: typeof req.body.title === 'string' ? req.body.title : '',
-      description: typeof req.body.description === 'string' ? req.body.description : '',
-      category: typeof req.body.category === 'string' ? req.body.category : '',
-      date: typeof req.body.date === 'string' ? req.body.date : '',
-      venue: typeof req.body.venue === 'string' ? req.body.venue : '',
-      capacity: typeof req.body.capacity === 'number' ? Math.trunc(req.body.capacity) : 0,
-      price: typeof req.body.price === 'number' ? req.body.price : 0
+      title: req.body.title,
+      description: req.body.description,
+      category: req.body.category,
+      startDateTime: req.body.startDateTime,
+      endDateTime: req.body.endDateTime,
+      venueType: req.body.venueType,
+      venue: req.body.address === undefined ? req.body.venue : req.body.address,
+      address: req.body.address,
+      meetingLink: req.body.meetingLink,
+      capacity: req.body.capacity,
+      ticketTypes: req.body.ticketTypes,
+      currency: req.body.currency,
+      tags: req.body.tags
     };
-    const fields = validateEvent(input);
+    const fields = validateEvent(input, eventService.clock() * 1000);
     if (Object.keys(fields).length) {
       res.status(400).json({ error: 'Validation failed', fields });
       return;
