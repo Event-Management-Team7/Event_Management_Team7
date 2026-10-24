@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { pbkdf2Sync } from 'node:crypto';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
@@ -386,6 +387,22 @@ test('AC8: missing, tampered, expired or unsigned tokens get 401 on a protected 
   assert.equal((await protectedGet(token)).status, 200);
   time.now = FIXED_NOW + 3601;
   assert.equal((await protectedGet(token)).status, 401);
+});
+
+test('an account created before the bcrypt switch (PBKDF2 hash, mixed-case email) can still log in', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const salt = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+  const hash = pbkdf2Sync(VALID_PASSWORD, salt, 1_000, 32, 'sha256').toString('hex');
+  db.run(
+    'INSERT INTO users (name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+    ['Old Account', 'Old@Example.test', 'Organizer', `pbkdf2$1000$${salt.toString('hex')}$${hash}`, 1]
+  );
+  const ok = await request(app).post('/api/auth/login').send({ email: 'old@example.test', password: VALID_PASSWORD });
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal(ok.body.user.role, 'Organizer');
+  const bad = await request(app).post('/api/auth/login').send({ email: 'old@example.test', password: 'WrongPass123' });
+  assert.equal(bad.status, 401);
 });
 
 test('a token for a deleted account is rejected, and role changes apply to the next request', async (t) => {
