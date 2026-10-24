@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { DEFAULT_ITERATIONS, hashPassword, verifyPassword } from '../auth/passwords.js';
+import { DEFAULT_COST, hashPassword, verifyPassword } from '../auth/passwords.js';
 
 const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const MAX_FAILURES = 5;
@@ -17,13 +17,18 @@ function publicUser(row) {
   };
 }
 
-function createUser(db, clock, iterations, { name, email, phone = '', password, role }) {
-  const passwordHash = hashPassword(password, iterations);
+function createUser(db, clock, cost, { name, email, phone = '', password, role }) {
+  // Emails are stored trimmed and lowercase so uniqueness and login are case-insensitive.
+  name = name.trim();
+  email = email.trim().toLowerCase();
+  // The UNIQUE index is case-sensitive, so also catch accounts stored with mixed-case emails.
+  if (db.get('SELECT 1 AS found FROM users WHERE lower(email) = ?', [email])) return null;
+  const passwordHash = hashPassword(password, cost);
   const createdAt = clock();
   try {
     const result = db.run(
-      `INSERT INTO users (name, email, phone, role, password_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (name, email, phone, role, password_hash, email_verified, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
       [name, email, phone, role, passwordHash, createdAt]
     );
     const row = db.get(
@@ -40,22 +45,27 @@ function createUser(db, clock, iterations, { name, email, phone = '', password, 
 }
 
 export class AuthService {
-  constructor(db, { iterations = DEFAULT_ITERATIONS, clock = () => Math.floor(Date.now() / 1000) } = {}) {
+  constructor(db, { cost = DEFAULT_COST, clock = () => Math.floor(Date.now() / 1000) } = {}) {
     this.db = db;
-    this.iterations = iterations;
+    this.cost = cost;
     this.clock = clock;
     this.attempts = new Map();
   }
 
   register(input) {
-    return createUser(this.db, this.clock, this.iterations, { ...input, role: 'Attendee' });
+    const role = typeof input.role === 'string' ? input.role.trim() : '';
+    if (role !== 'Attendee' && role !== 'Organizer') {
+      throw new TypeError('Public registration only allows the Attendee or Organizer role');
+    }
+    return createUser(this.db, this.clock, this.cost, { ...input, role });
   }
 
+  // Admin accounts are never self-registered (SRS EMRS-F-001); seed scripts or an existing Admin use this.
   provisionUser(input) {
-    if (input.role !== 'Organizer' && input.role !== 'Admin') {
-      throw new TypeError('Trusted provisioning requires the Organizer or Admin role');
+    if (input.role !== 'Admin') {
+      throw new TypeError('Trusted provisioning requires the Admin role');
     }
-    return createUser(this.db, this.clock, this.iterations, input);
+    return createUser(this.db, this.clock, this.cost, input);
   }
 
   login(email, password) {

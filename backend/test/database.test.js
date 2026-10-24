@@ -128,7 +128,8 @@ test('adds missing event columns to an existing database without losing data', (
         ticket_details: ''
       });
       assert.equal(db.get('SELECT password_hash FROM users WHERE id = 1').password_hash, 'existing-hash');
-      assert.equal(db.get('PRAGMA user_version').user_version, 2);
+      assert.equal(db.get('PRAGMA user_version').user_version, 3);
+      assert.equal(db.get('SELECT email_verified FROM users WHERE id = 1').email_verified, 0);
     } finally {
       db.close();
     }

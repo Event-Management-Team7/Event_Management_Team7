@@ -1,16 +1,23 @@
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { pbkdf2Sync, timingSafeEqual } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 
-const SALT_BYTES = 16;
 const HASH_BYTES = 32;
-export const DEFAULT_ITERATIONS = 600_000;
+// bcrypt cost factor (work factor). Each +1 doubles the time to hash.
+export const DEFAULT_COST = 10;
 
-export function hashPassword(password, iterations = DEFAULT_ITERATIONS) {
-  const salt = randomBytes(SALT_BYTES);
-  const hash = pbkdf2Sync(password, salt, iterations, HASH_BYTES, 'sha256');
-  return `pbkdf2$${iterations}$${salt.toString('hex')}$${hash.toString('hex')}`;
+export const MAX_PASSWORD_BYTES = 72;
+
+export function hashPassword(password, cost = DEFAULT_COST) {
+  // bcrypt ignores everything past 72 bytes; refuse rather than store a password that is partly unchecked.
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) {
+    throw new RangeError(`Password must be at most ${MAX_PASSWORD_BYTES} bytes`);
+  }
+  return bcrypt.hashSync(password, cost);
 }
 
-export function verifyPassword(password, stored) {
+// Hashes created before the bcrypt switch use `pbkdf2$<iterations>$<salt>$<hash>`.
+// They still verify so existing accounts keep working.
+function verifyLegacyPbkdf2(password, stored) {
   const parts = stored.split('$');
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
   const iterations = Number(parts[1]);
@@ -23,4 +30,16 @@ export function verifyPassword(password, stored) {
 
   const actual = pbkdf2Sync(password, salt, iterations, HASH_BYTES, 'sha256');
   return timingSafeEqual(actual, expected);
+}
+
+export function verifyPassword(password, stored) {
+  if (typeof stored !== 'string') return false;
+  if (stored.startsWith('pbkdf2$')) return verifyLegacyPbkdf2(password, stored);
+  // bcrypt would compare only the first 72 bytes, so "<correct password>anything" must not match.
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) return false;
+  try {
+    return bcrypt.compareSync(password, stored);
+  } catch {
+    return false;
+  }
 }

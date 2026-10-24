@@ -20,7 +20,7 @@ const VALID_EVENT = {
 
 function setup() {
   const db = new Database(':memory:');
-  const app = createApp({ db, clock: () => FIXED_NOW, passwordIterations: 1_000 });
+  const app = createApp({ db, clock: () => FIXED_NOW, passwordCost: 4 });
   return { app, db };
 }
 
@@ -62,39 +62,157 @@ test('health routes return the existing response shape', async (t) => {
   }
 });
 
-test('registration validates fields and always provisions an attendee', async (t) => {
+const REGISTRATION = {
+  name: 'Example Person',
+  email: 'example@example.test',
+  password: VALID_PASSWORD,
+  role: 'Attendee'
+};
+
+test('AC1: registration creates an Attendee or Organizer account without exposing the password', async (t) => {
   const { app, db } = setup();
   t.after(() => db.close());
 
-  const invalid = await request(app).post('/api/auth/register').send({
-    name: '',
-    email: 'bad',
-    phone: '   ',
-    password: 'weak',
-    role: 'Root'
-  });
-  assert.equal(invalid.status, 400);
-  assert.deepEqual(Object.keys(invalid.body.fields).sort(), ['email', 'name', 'password', 'phone', 'role']);
-
-  for (const requestedRole of ['Attendee', 'Organizer', 'Admin']) {
-    const response = await request(app).post('/api/auth/register').send({
-      name: 'Example Person',
-      email: `${requestedRole.toLowerCase()}@example.test`,
-      password: VALID_PASSWORD,
-      role: requestedRole
-    });
-    assert.equal(response.status, 201);
-    assert.equal(response.body.user.role, 'Attendee');
-    assert.equal(response.body.user.phone, '');
-    assert.equal(response.text.includes('password_hash'), false);
+  for (const role of ['Attendee', 'Organizer']) {
+    const response = await request(app)
+      .post('/api/auth/register')
+      .send({ ...REGISTRATION, email: `${role.toLowerCase()}@example.test`, role });
+    assert.equal(response.status, 201, response.text);
+    assert.equal(response.body.user.role, role);
+    assert.equal(response.body.user.name, 'Example Person');
+    assert.equal(response.body.user.email, `${role.toLowerCase()}@example.test`);
+    assert.ok(response.body.user.id);
+    assert.equal(response.text.includes('password'), false);
+    assert.equal(response.text.includes(VALID_PASSWORD), false);
   }
+});
 
-  const duplicate = await request(app).post('/api/auth/register').send({
-    name: 'Example Person',
-    email: 'admin@example.test',
-    password: VALID_PASSWORD
-  });
+test('AC2: duplicate email is rejected case-insensitively with 409', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'a@x.com' })).status, 201);
+
+  const duplicate = await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'A@X.com' });
   assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.body.error, 'Email already registered');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 1);
+  assert.equal(db.get('SELECT email FROM users').email, 'a@x.com');
+});
+
+test('AC3: missing or blank fields return 400 naming every invalid field', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+
+  const empty = await request(app).post('/api/auth/register').send({});
+  assert.equal(empty.status, 400);
+  assert.deepEqual(Object.keys(empty.body.fields).sort(), ['email', 'name', 'password', 'role']);
+
+  const blank = await request(app)
+    .post('/api/auth/register')
+    .send({ name: '   ', email: '  ', password: '', role: ' ' });
+  assert.equal(blank.status, 400);
+  assert.deepEqual(Object.keys(blank.body.fields).sort(), ['email', 'name', 'password', 'role']);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+});
+
+test('AC4: malformed email addresses are rejected', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  for (const email of ['abc', 'a@', 'a@b', '@x.com', `${'a'.repeat(250)}@x.com`]) {
+    const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, email });
+    assert.equal(response.status, 400, email);
+    assert.ok(response.body.fields.email, email);
+  }
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+});
+
+test('AC5: passwords must be 8+ characters with an uppercase letter, a lowercase letter and a digit', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  for (const password of ['Short1a', 'alllowercase1', 'ALLUPPERCASE1', 'NoDigitsHere']) {
+    const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, password });
+    assert.equal(response.status, 400, password);
+    assert.match(response.body.fields.password, /uppercase letter, a lowercase letter, and a digit/);
+  }
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+});
+
+test('AC6: only Attendee and Organizer roles can self-register; Admin is rejected', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  for (const role of ['Admin', 'Root', 'attendee', '']) {
+    const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, role });
+    assert.equal(response.status, 400, role);
+    assert.match(response.body.fields.role, /Attendee or Organizer/);
+  }
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+});
+
+test('AC7: the stored password is a salted bcrypt hash, never the plaintext', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'one@example.test' });
+  await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'two@example.test' });
+  const [first, second] = db.all('SELECT password_hash FROM users ORDER BY id');
+  assert.match(first.password_hash, /^\$2[aby]\$\d{2}\$/);
+  assert.equal(first.password_hash.includes(VALID_PASSWORD), false);
+  assert.notEqual(first.password_hash, second.password_hash);
+});
+
+test('AC8: verification is deferred; the account is usable immediately with email_verified = 0', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
+  assert.equal(registration.status, 201);
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
+  const login = await request(app)
+    .post('/api/auth/login')
+    .send({ email: REGISTRATION.email, password: VALID_PASSWORD });
+  assert.equal(login.status, 200);
+});
+
+test('a role with surrounding whitespace is accepted and normalised, not a server error', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, role: ' Organizer ' });
+  assert.equal(response.status, 201, response.text);
+  assert.equal(response.body.user.role, 'Organizer');
+});
+
+test('passwords longer than 72 bytes are rejected instead of being silently truncated by bcrypt', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const atLimit = `Aa1${'x'.repeat(69)}`;
+  const overLimit = `${atLimit}x`;
+  assert.equal(atLimit.length, 72);
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, password: overLimit })).status, 400);
+  // Multi-byte characters count by bytes, not characters.
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, password: `Aa1${'é'.repeat(36)}` })).status, 400);
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, password: atLimit })).status, 201);
+  const login = await request(app).post('/api/auth/login').send({ email: REGISTRATION.email, password: `${atLimit}different` });
+  assert.equal(login.status, 401);
+});
+
+test('registration also rejects an email that matches a legacy mixed-case account', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  db.run(
+    "INSERT INTO users (name, email, role, password_hash, created_at) VALUES ('Legacy', 'Legacy@X.com', 'Attendee', 'x', 1)"
+  );
+  const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'legacy@x.com' });
+  assert.equal(response.status, 409);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 1);
+});
+
+test('registration trims the name and stores the email in lowercase', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const response = await request(app)
+    .post('/api/auth/register')
+    .send({ ...REGISTRATION, name: '  Padded Name  ', email: '  Mixed.Case@Example.Test ' });
+  assert.equal(response.status, 201);
+  assert.equal(response.body.user.name, 'Padded Name');
+  assert.equal(response.body.user.email, 'mixed.case@example.test');
 });
 
 test('registration rejects malformed bodies and login handles invalid credentials and lockout', async (t) => {

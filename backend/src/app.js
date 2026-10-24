@@ -9,10 +9,10 @@ import { EventService } from './services/events.js';
 import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
 
-export function createApp({ db, clock, passwordIterations } = {}) {
+export function createApp({ db, clock, passwordCost } = {}) {
   if (!db) throw new Error('A database instance is required');
 
-  const authService = new AuthService(db, { clock, iterations: passwordIterations });
+  const authService = new AuthService(db, { clock, cost: passwordCost });
   const eventService = new EventService(db, clock);
   const registrationService = new RegistrationService(db, clock);
   const ticketService = new TicketService(db, clock);
