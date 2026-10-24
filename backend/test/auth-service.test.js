@@ -13,6 +13,11 @@ test('password hashes are salted bcrypt hashes that verify correctly', () => {
   assert.equal(verifyPassword('SecurePass123', first), true);
   assert.equal(verifyPassword('IncorrectPass123', first), false);
   assert.equal(verifyPassword('SecurePass123', 'not-a-hash'), false);
+  const long = `Aa1${'x'.repeat(69)}`;
+  const longHash = hashPassword(long, 4);
+  assert.equal(verifyPassword(long, longHash), true);
+  assert.equal(verifyPassword(`${long}extra`, longHash), false);
+  assert.throws(() => hashPassword(`${long}x`, 4), RangeError);
 });
 
 test('legacy PBKDF2 hashes still verify so existing accounts keep working', () => {

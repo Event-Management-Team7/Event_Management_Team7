@@ -21,6 +21,8 @@ function createUser(db, clock, cost, { name, email, phone = '', password, role }
   // Emails are stored trimmed and lowercase so uniqueness and login are case-insensitive.
   name = name.trim();
   email = email.trim().toLowerCase();
+  // The UNIQUE index is case-sensitive, so also catch accounts stored with mixed-case emails.
+  if (db.get('SELECT 1 AS found FROM users WHERE lower(email) = ?', [email])) return null;
   const passwordHash = hashPassword(password, cost);
   const createdAt = clock();
   try {
@@ -51,10 +53,11 @@ export class AuthService {
   }
 
   register(input) {
-    if (input.role !== 'Attendee' && input.role !== 'Organizer') {
+    const role = typeof input.role === 'string' ? input.role.trim() : '';
+    if (role !== 'Attendee' && role !== 'Organizer') {
       throw new TypeError('Public registration only allows the Attendee or Organizer role');
     }
-    return createUser(this.db, this.clock, this.cost, { ...input, role: input.role.trim() });
+    return createUser(this.db, this.clock, this.cost, { ...input, role });
   }
 
   // Admin accounts are never self-registered (SRS EMRS-F-001); seed scripts or an existing Admin use this.

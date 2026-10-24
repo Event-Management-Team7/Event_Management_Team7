@@ -5,7 +5,13 @@ const HASH_BYTES = 32;
 // bcrypt cost factor (work factor). Each +1 doubles the time to hash.
 export const DEFAULT_COST = 10;
 
+export const MAX_PASSWORD_BYTES = 72;
+
 export function hashPassword(password, cost = DEFAULT_COST) {
+  // bcrypt ignores everything past 72 bytes; refuse rather than store a password that is partly unchecked.
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) {
+    throw new RangeError(`Password must be at most ${MAX_PASSWORD_BYTES} bytes`);
+  }
   return bcrypt.hashSync(password, cost);
 }
 
@@ -29,6 +35,8 @@ function verifyLegacyPbkdf2(password, stored) {
 export function verifyPassword(password, stored) {
   if (typeof stored !== 'string') return false;
   if (stored.startsWith('pbkdf2$')) return verifyLegacyPbkdf2(password, stored);
+  // bcrypt would compare only the first 72 bytes, so "<correct password>anything" must not match.
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) return false;
   try {
     return bcrypt.compareSync(password, stored);
   } catch {

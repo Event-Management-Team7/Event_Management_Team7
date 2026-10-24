@@ -61,13 +61,14 @@ function AuthPanel({ onAuthenticated, setNotice, setError }) {
       <form onSubmit={submit}>
         {mode === 'register' && (
           <>
-            <label>Full name<input name="name" autoComplete="name" required minLength="2" maxLength="60" /></label>
+            <label>Full name<input name="name" autoComplete="name" required minLength="2" maxLength="50" /></label>
+            <label>Role<select name="role" defaultValue="Attendee" required><option value="Attendee">Attendee</option><option value="Organizer">Organizer</option></select></label>
             <label>Phone (optional)<input name="phone" autoComplete="tel" inputMode="numeric" /></label>
-            <p className="hint">New public accounts are created as Attendees.</p>
           </>
         )}
         <label>Email<input name="email" type="email" autoComplete="email" required /></label>
-        <label>Password<input name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} /></label>
+        <label>Password<input name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 8 : undefined} maxLength={mode === 'register' ? 72 : undefined} /></label>
+        {mode === 'register' && <p className="hint">8-72 characters with an uppercase letter, a lowercase letter, and a digit.</p>}
         {Object.entries(fields).map(([field, message]) => <small className="field-error" key={field}>{message}</small>)}
         <button className="primary full" type="submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
       </form>

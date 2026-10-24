@@ -25,15 +25,16 @@ export function validateRegistration(input) {
   if (rawPhone && !/^[6-9]\d{9}$/.test(phone)) {
     fields.phone = 'Phone must be a valid 10-digit number.';
   }
+  // bcrypt only uses the first 72 bytes, so longer passwords are rejected rather than silently truncated.
   if (
     password.length < 8 ||
-    password.length > 128 ||
+    Buffer.byteLength(password, 'utf8') > 72 ||
     !/[A-Z]/.test(password) ||
     !/[a-z]/.test(password) ||
     !/\d/.test(password)
   ) {
     fields.password =
-      'Password must be at least 8 characters long and contain an uppercase letter, a lowercase letter, and a digit.';
+      'Password must be 8-72 characters long and contain an uppercase letter, a lowercase letter, and a digit.';
   }
   if (!REGISTRATION_ROLES.has(role)) fields.role = REGISTRATION_ROLE_ERROR;
   return fields;

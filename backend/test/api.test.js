@@ -171,6 +171,39 @@ test('AC8: verification is deferred; the account is usable immediately with emai
   assert.equal(login.status, 200);
 });
 
+test('a role with surrounding whitespace is accepted and normalised, not a server error', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, role: ' Organizer ' });
+  assert.equal(response.status, 201, response.text);
+  assert.equal(response.body.user.role, 'Organizer');
+});
+
+test('passwords longer than 72 bytes are rejected instead of being silently truncated by bcrypt', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const atLimit = `Aa1${'x'.repeat(69)}`;
+  const overLimit = `${atLimit}x`;
+  assert.equal(atLimit.length, 72);
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, password: overLimit })).status, 400);
+  // Multi-byte characters count by bytes, not characters.
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, password: `Aa1${'é'.repeat(36)}` })).status, 400);
+  assert.equal((await request(app).post('/api/auth/register').send({ ...REGISTRATION, password: atLimit })).status, 201);
+  const login = await request(app).post('/api/auth/login').send({ email: REGISTRATION.email, password: `${atLimit}different` });
+  assert.equal(login.status, 401);
+});
+
+test('registration also rejects an email that matches a legacy mixed-case account', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  db.run(
+    "INSERT INTO users (name, email, role, password_hash, created_at) VALUES ('Legacy', 'Legacy@X.com', 'Attendee', 'x', 1)"
+  );
+  const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'legacy@x.com' });
+  assert.equal(response.status, 409);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 1);
+});
+
 test('registration trims the name and stores the email in lowercase', async (t) => {
   const { app, db } = setup();
   t.after(() => db.close());
