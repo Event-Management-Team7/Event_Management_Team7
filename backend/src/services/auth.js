@@ -1,7 +1,10 @@
 import { randomBytes } from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { DEFAULT_COST, hashPassword, verifyPassword } from '../auth/passwords.js';
 
-const SESSION_TTL_SECONDS = 24 * 60 * 60;
+// Token lifetime is 1 hour with no refresh token (EMT-12 scope decision).
+const TOKEN_TTL_SECONDS = 60 * 60;
+const JWT_ALGORITHM = 'HS256';
 const MAX_FAILURES = 5;
 const LOCK_SECONDS = 5 * 60;
 const DUMMY_HASH = hashPassword('dummy-pass-never-matches-anything');
@@ -45,7 +48,16 @@ function createUser(db, clock, cost, { name, email, phone = '', password, role }
 }
 
 export class AuthService {
-  constructor(db, { cost = DEFAULT_COST, clock = () => Math.floor(Date.now() / 1000) } = {}) {
+  constructor(
+    db,
+    { cost = DEFAULT_COST, clock = () => Math.floor(Date.now() / 1000), jwtSecret = process.env.EMRS_JWT_SECRET } = {}
+  ) {
+    if (!jwtSecret) {
+      // Without a configured secret, tokens stop working whenever the server restarts.
+      console.warn('EMRS_JWT_SECRET is not set; using a random secret. Issued tokens will not survive a restart.');
+      jwtSecret = randomBytes(32).toString('hex');
+    }
+    this.jwtSecret = jwtSecret;
     this.db = db;
     this.cost = cost;
     this.clock = clock;
@@ -70,13 +82,16 @@ export class AuthService {
 
   login(email, password) {
     const now = this.clock();
+    // Emails are matched case-insensitively.
+    email = email.trim().toLowerCase();
     const attempt = this.attempts.get(email);
     if (attempt && attempt.lockedUntil > now) return { status: 'locked' };
 
     const user = this.db.get(
-      'SELECT id, name, email, phone, role, password_hash, created_at FROM users WHERE email = ?',
+      'SELECT id, name, email, phone, role, password_hash, created_at FROM users WHERE lower(email) = ?',
       [email]
     );
+    // Verify against a dummy hash for unknown emails so response time does not reveal which emails exist.
     const passwordIsValid = verifyPassword(password, user?.password_hash ?? DUMMY_HASH) && Boolean(user);
     if (!passwordIsValid) {
       const current = this.attempts.get(email) ?? { failures: 0, lockedUntil: 0 };
@@ -92,13 +107,11 @@ export class AuthService {
     }
 
     this.attempts.delete(email);
-    const token = randomBytes(32).toString('hex');
-    const expiresAt = now + SESSION_TTL_SECONDS;
-    this.db.run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', [
-      token,
-      user.id,
-      expiresAt
-    ]);
+    const expiresAt = now + TOKEN_TTL_SECONDS;
+    const token = jwt.sign({ sub: String(user.id), role: user.role, iat: now }, this.jwtSecret, {
+      algorithm: JWT_ALGORITHM,
+      expiresIn: TOKEN_TTL_SECONDS
+    });
     return {
       status: 'ok',
       token,
@@ -107,21 +120,27 @@ export class AuthService {
     };
   }
 
-  authenticate(token) {
-    const now = this.clock();
-    const session = this.db.get('SELECT user_id, expires_at FROM sessions WHERE token = ?', [token]);
-    if (!session) return null;
-    if (session.expires_at < now) {
-      this.db.run('DELETE FROM sessions WHERE token = ?', [token]);
+  verifyToken(token) {
+    try {
+      return jwt.verify(token, this.jwtSecret, { algorithms: [JWT_ALGORITHM], clockTimestamp: this.clock() });
+    } catch {
       return null;
     }
-    return this.db.get(
-      'SELECT id, name, email, phone, role FROM users WHERE id = ?',
-      [session.user_id]
-    ) ?? null;
   }
 
+  // Returns the current user for a valid, unexpired token, otherwise null.
+  // The user is read from the database so role changes and deleted accounts take effect immediately.
+  authenticate(token) {
+    const claims = this.verifyToken(token);
+    if (!claims) return null;
+    const id = Number(claims.sub);
+    if (!Number.isSafeInteger(id)) return null;
+    return this.db.get('SELECT id, name, email, phone, role FROM users WHERE id = ?', [id]) ?? null;
+  }
+
+  // Tokens are stateless and logout is client-side (discard the token).
+  // This only confirms the token was valid; there is no server-side revocation in Sprint 1.
   logout(token) {
-    return this.db.run('DELETE FROM sessions WHERE token = ?', [token]).changes > 0;
+    return this.verifyToken(token) !== null;
   }
 }

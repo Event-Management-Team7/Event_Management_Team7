@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { pbkdf2Sync } from 'node:crypto';
 import test from 'node:test';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { Database } from '../src/db/database.js';
 
 const FIXED_NOW = 1_800_000_000;
 const VALID_PASSWORD = 'SecurePass123';
+const JWT_SECRET = 'test-secret-for-unit-tests-only';
 const VALID_EVENT = {
   title: 'Future Workshop',
   description: 'A practical workshop.',
@@ -20,8 +23,20 @@ const VALID_EVENT = {
 
 function setup() {
   const db = new Database(':memory:');
-  const app = createApp({ db, clock: () => FIXED_NOW, passwordCost: 4 });
+  const app = createApp({ db, clock: () => FIXED_NOW, passwordCost: 4, jwtSecret: JWT_SECRET });
   return { app, db };
+}
+
+// Like setup(), but the test can move time forward to exercise token expiry.
+function setupWithClock() {
+  const db = new Database(':memory:');
+  const time = { now: FIXED_NOW };
+  const app = createApp({ db, clock: () => time.now, passwordCost: 4, jwtSecret: JWT_SECRET });
+  return { app, db, time };
+}
+
+function decodePayload(token) {
+  return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
 }
 
 async function createUser(app, { name = 'Test User', role = 'Attendee', email = `${role.toLowerCase()}@example.test` } = {}) {
@@ -247,25 +262,173 @@ test('registration rejects malformed bodies and login handles invalid credential
   assert.match(locked.body.error, /temporarily locked/);
 });
 
-test('login returns a database-backed bearer session, me authenticates, and logout revokes it', async (t) => {
+const LOGIN_USER = { name: 'Login User', email: 'a@x.com', password: VALID_PASSWORD, role: 'Attendee' };
+
+async function registerLoginUser(app) {
+  const registration = await request(app).post('/api/auth/register').send(LOGIN_USER);
+  assert.equal(registration.status, 201, registration.text);
+  return registration.body.user;
+}
+
+test('AC1: login returns 200, a signed JWT, and the user id, name and role', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const user = await registerLoginUser(app);
+
+  const response = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: VALID_PASSWORD });
+  assert.equal(response.status, 200, response.text);
+  assert.equal(response.body.user.id, user.id);
+  assert.equal(response.body.user.name, 'Login User');
+  assert.equal(response.body.user.role, 'Attendee');
+  assert.equal(response.text.includes('password'), false);
+  assert.equal(response.body.token.split('.').length, 3);
+  const verified = jwt.verify(response.body.token, JWT_SECRET, { algorithms: ['HS256'], clockTimestamp: FIXED_NOW });
+  assert.equal(verified.sub, String(user.id));
+});
+
+test('AC2: the JWT carries the user id and role, expires in 1 hour, and never includes the password', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const user = await registerLoginUser(app);
+
+  const response = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: VALID_PASSWORD });
+  const payload = decodePayload(response.body.token);
+  assert.equal(payload.sub, String(user.id));
+  assert.equal(payload.role, 'Attendee');
+  assert.equal(payload.exp - payload.iat, 3600);
+  assert.equal(response.body.expiresAt, payload.exp);
+  assert.equal(JSON.stringify(payload).toLowerCase().includes('password'), false);
+});
+
+test('AC3: a wrong password returns 401 with no token', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await registerLoginUser(app);
+
+  const response = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: 'WrongPass123' });
+  assert.equal(response.status, 401);
+  assert.equal(response.body.error, 'Invalid email or password.');
+  assert.equal(response.body.token, undefined);
+});
+
+test('AC4: an unknown email returns the same 401 message as a wrong password', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await registerLoginUser(app);
+
+  const wrongPassword = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: 'WrongPass123' });
+  const unknownEmail = await request(app).post('/api/auth/login').send({ email: 'nobody@x.com', password: VALID_PASSWORD });
+  assert.equal(unknownEmail.status, 401);
+  assert.deepEqual(unknownEmail.body, wrongPassword.body);
+});
+
+test('AC5: a missing or blank email or password returns 400 and no token', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await registerLoginUser(app);
+
+  for (const body of [{}, { email: 'a@x.com' }, { password: VALID_PASSWORD }, { email: '  ', password: VALID_PASSWORD }, { email: 'a@x.com', password: '' }]) {
+    const response = await request(app).post('/api/auth/login').send(body);
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(response.body.token, undefined);
+  }
+});
+
+test('AC6: login matches the email case-insensitively', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await registerLoginUser(app);
+
+  const response = await request(app).post('/api/auth/login').send({ email: 'A@X.com', password: VALID_PASSWORD });
+  assert.equal(response.status, 200, response.text);
+  assert.ok(response.body.token);
+});
+
+test('AC7: a valid token is accepted on a protected endpoint', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const user = await registerLoginUser(app);
+  const login = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: VALID_PASSWORD });
+
+  const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${login.body.token}`);
+  assert.equal(me.status, 200);
+  assert.equal(me.body.user.id, user.id);
+  assert.equal(me.body.user.email, 'a@x.com');
+  assert.equal(me.body.user.role, 'Attendee');
+});
+
+test('AC8: missing, tampered, expired or unsigned tokens get 401 on a protected endpoint', async (t) => {
+  const { app, db, time } = setupWithClock();
+  t.after(() => db.close());
+  const user = await registerLoginUser(app);
+  const login = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: VALID_PASSWORD });
+  const token = login.body.token;
+  const protectedGet = (value) => {
+    const req = request(app).get('/api/auth/me');
+    return value === undefined ? req : req.set('Authorization', `Bearer ${value}`);
+  };
+
+  assert.equal((await protectedGet()).status, 401);
+  assert.equal((await protectedGet('not-a-jwt')).status, 401);
+
+  const tamperedSignature = `${token.slice(0, -2)}${token.endsWith('AA') ? 'BB' : 'AA'}`;
+  assert.equal((await protectedGet(tamperedSignature)).status, 401);
+
+  const [header, , signature] = token.split('.');
+  const forgedPayload = Buffer.from(JSON.stringify({ ...decodePayload(token), role: 'Admin' })).toString('base64url');
+  assert.equal((await protectedGet(`${header}.${forgedPayload}.${signature}`)).status, 401);
+
+  const unsigned = jwt.sign({ sub: String(user.id), role: 'Admin' }, '', { algorithm: 'none' });
+  assert.equal((await protectedGet(unsigned)).status, 401);
+  const wrongSecret = jwt.sign({ sub: String(user.id), role: 'Admin', iat: FIXED_NOW }, 'a-different-secret', { expiresIn: 3600 });
+  assert.equal((await protectedGet(wrongSecret)).status, 401);
+
+  time.now = FIXED_NOW + 3599;
+  assert.equal((await protectedGet(token)).status, 200);
+  time.now = FIXED_NOW + 3601;
+  assert.equal((await protectedGet(token)).status, 401);
+});
+
+test('an account created before the bcrypt switch (PBKDF2 hash, mixed-case email) can still log in', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const salt = Buffer.from('00112233445566778899aabbccddeeff', 'hex');
+  const hash = pbkdf2Sync(VALID_PASSWORD, salt, 1_000, 32, 'sha256').toString('hex');
+  db.run(
+    'INSERT INTO users (name, email, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+    ['Old Account', 'Old@Example.test', 'Organizer', `pbkdf2$1000$${salt.toString('hex')}$${hash}`, 1]
+  );
+  const ok = await request(app).post('/api/auth/login').send({ email: 'old@example.test', password: VALID_PASSWORD });
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal(ok.body.user.role, 'Organizer');
+  const bad = await request(app).post('/api/auth/login').send({ email: 'old@example.test', password: 'WrongPass123' });
+  assert.equal(bad.status, 401);
+});
+
+test('a token for a deleted account is rejected, and role changes apply to the next request', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const user = await registerLoginUser(app);
+  const login = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: VALID_PASSWORD });
+  const auth = { Authorization: `Bearer ${login.body.token}` };
+
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', user.id]);
+  assert.equal((await request(app).get('/api/auth/me').set(auth)).body.user.role, 'Organizer');
+  db.run('DELETE FROM users WHERE id = ?', [user.id]);
+  assert.equal((await request(app).get('/api/auth/me').set(auth)).status, 401);
+});
+
+test('logout is client-side: it confirms a valid token but does not revoke it', async (t) => {
   const { app, db } = setup();
   t.after(() => db.close());
   const credentials = await createUser(app, { name: 'Sample User', email: 'sample@example.test' });
-  const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${credentials.token}`);
-  assert.equal(me.status, 200);
-  assert.deepEqual(me.body.user, {
-    id: credentials.user.id,
-    name: 'Sample User',
-    email: 'sample@example.test',
-    phone: '9876543210',
-    role: 'Attendee'
-  });
+  const auth = { Authorization: `Bearer ${credentials.token}` };
 
   assert.equal((await request(app).get('/api/auth/me')).status, 401);
   assert.equal((await request(app).post('/api/auth/logout').set('Authorization', 'Bearer invalid')).status, 400);
-  const logout = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${credentials.token}`);
-  assert.equal(logout.status, 200);
-  assert.equal((await request(app).get('/api/auth/me').set('Authorization', `Bearer ${credentials.token}`)).status, 401);
+  assert.equal((await request(app).post('/api/auth/logout').set(auth)).status, 200);
+  // No server-side blacklist in Sprint 1: the client discards the token.
+  assert.equal((await request(app).get('/api/auth/me').set(auth)).status, 200);
 });
 
 test('event creation enforces authorization and validation; public list supports filters and detail lookup', async (t) => {
