@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     phone TEXT DEFAULT '',
     role TEXT NOT NULL DEFAULT 'Attendee',
     password_hash TEXT NOT NULL,
+    email_verified INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
 );
 

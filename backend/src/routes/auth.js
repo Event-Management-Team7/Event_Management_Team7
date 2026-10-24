@@ -28,7 +28,7 @@ export function createAuthRouter({ authService, authentication }) {
     try {
       const user = authService.register(input);
       if (!user) {
-        res.status(409).json({ error: 'An account with this email already exists.' });
+        res.status(409).json({ error: 'Email already registered' });
         return;
       }
       res.status(201).json({ message: 'Registration successful', user });

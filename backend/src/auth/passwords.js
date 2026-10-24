@@ -1,16 +1,17 @@
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { pbkdf2Sync, timingSafeEqual } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 
-const SALT_BYTES = 16;
 const HASH_BYTES = 32;
-export const DEFAULT_ITERATIONS = 600_000;
+// bcrypt cost factor (work factor). Each +1 doubles the time to hash.
+export const DEFAULT_COST = 10;
 
-export function hashPassword(password, iterations = DEFAULT_ITERATIONS) {
-  const salt = randomBytes(SALT_BYTES);
-  const hash = pbkdf2Sync(password, salt, iterations, HASH_BYTES, 'sha256');
-  return `pbkdf2$${iterations}$${salt.toString('hex')}$${hash.toString('hex')}`;
+export function hashPassword(password, cost = DEFAULT_COST) {
+  return bcrypt.hashSync(password, cost);
 }
 
-export function verifyPassword(password, stored) {
+// Hashes created before the bcrypt switch use `pbkdf2$<iterations>$<salt>$<hash>`.
+// They still verify so existing accounts keep working.
+function verifyLegacyPbkdf2(password, stored) {
   const parts = stored.split('$');
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
   const iterations = Number(parts[1]);
@@ -23,4 +24,14 @@ export function verifyPassword(password, stored) {
 
   const actual = pbkdf2Sync(password, salt, iterations, HASH_BYTES, 'sha256');
   return timingSafeEqual(actual, expected);
+}
+
+export function verifyPassword(password, stored) {
+  if (typeof stored !== 'string') return false;
+  if (stored.startsWith('pbkdf2$')) return verifyLegacyPbkdf2(password, stored);
+  try {
+    return bcrypt.compareSync(password, stored);
+  } catch {
+    return false;
+  }
 }

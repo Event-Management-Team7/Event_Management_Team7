@@ -1,6 +1,7 @@
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-const ROLES = new Set(['Attendee', 'Organizer', 'Admin']);
-const REGISTRATION_ROLE_ERROR = 'Role must be Attendee, Organizer, or Admin.';
+// Admin accounts are never self-registered; they are provisioned separately.
+const REGISTRATION_ROLES = new Set(['Attendee', 'Organizer']);
+const REGISTRATION_ROLE_ERROR = 'Role must be Attendee or Organizer.';
 
 export function isObjectBody(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -13,11 +14,10 @@ export function validateRegistration(input) {
   const rawPhone = typeof input.phone === 'string' ? input.phone : '';
   const phone = rawPhone.trim();
   const password = typeof input.password === 'string' ? input.password : '';
-  const rawRole = typeof input.role === 'string' ? input.role : '';
-  const role = rawRole.trim();
+  const role = typeof input.role === 'string' ? input.role.trim() : '';
 
-  if (name.length < 2 || name.length > 60 || !/^[A-Za-z .'-]+$/.test(name)) {
-    fields.name = 'Name must be 2-60 characters and contain only letters, spaces, or hyphens.';
+  if (name.length < 2 || name.length > 50) {
+    fields.name = 'Name must be 2-50 characters.';
   }
   if (!email || email.length > 254 || !EMAIL_PATTERN.test(email)) {
     fields.email = 'Please enter a valid email address.';
@@ -25,10 +25,17 @@ export function validateRegistration(input) {
   if (rawPhone && !/^[6-9]\d{9}$/.test(phone)) {
     fields.phone = 'Phone must be a valid 10-digit number.';
   }
-  if (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    fields.password = 'Password must be at least 8 characters long and contain both letters and numbers.';
+  if (
+    password.length < 8 ||
+    password.length > 128 ||
+    !/[A-Z]/.test(password) ||
+    !/[a-z]/.test(password) ||
+    !/\d/.test(password)
+  ) {
+    fields.password =
+      'Password must be at least 8 characters long and contain an uppercase letter, a lowercase letter, and a digit.';
   }
-  if (rawRole && !ROLES.has(role)) fields.role = REGISTRATION_ROLE_ERROR;
+  if (!REGISTRATION_ROLES.has(role)) fields.role = REGISTRATION_ROLE_ERROR;
   return fields;
 }
 

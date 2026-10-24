@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
 const schemaSql = readFileSync(schemaPath, 'utf8');
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 const EVENT_COLUMNS = new Map([
   ['start_time', "TEXT NOT NULL DEFAULT ''"],
   ['venue_type', "TEXT NOT NULL DEFAULT 'physical'"],
@@ -33,6 +33,14 @@ export function migrate(db) {
       if (!existingEventColumns.has(column)) {
         db.exec(`ALTER TABLE events ADD COLUMN ${column} ${definition}`);
       }
+    }
+
+    // email_verified is stored now so Sprint 2 can add email verification without a data migration.
+    const existingUserColumns = new Set(
+      db.prepare('PRAGMA table_info(users)').all().map((column) => column.name)
+    );
+    if (!existingUserColumns.has('email_verified')) {
+      db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0');
     }
 
     db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);
