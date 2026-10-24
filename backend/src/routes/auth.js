@@ -42,11 +42,17 @@ export function createAuthRouter({ authService, authentication }) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
     }
+    const email = typeof req.body.email === 'string' ? req.body.email : '';
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const fields = {};
+    if (!email.trim()) fields.email = 'Email is required.';
+    if (!password) fields.password = 'Password is required.';
+    if (Object.keys(fields).length) {
+      res.status(400).json({ error: 'Validation failed', fields });
+      return;
+    }
     try {
-      const result = authService.login(
-        typeof req.body.email === 'string' ? req.body.email : '',
-        typeof req.body.password === 'string' ? req.body.password : ''
-      );
+      const result = authService.login(email, password);
       if (result.status === 'locked') {
         res.status(429).json({ error: 'Too many failed attempts. Account temporarily locked.' });
       } else if (result.status === 'invalid') {
