@@ -13,17 +13,16 @@ Testing - Avinash Julakatti
 
 ## Tech Stack
 - **Backend:** Node.js & Express REST API, SQLite3 (`better-sqlite3`)
-- **Frontend:** React.js (Vite) Single-Page Application (`frontend/`) and responsive HTML5 / CSS3 / JavaScript client (`web/`)
+- **Frontend:** React.js (Vite) Single-Page Application (`frontend/`)
 - **Security:** Salted bcrypt password hashing, JWT bearer tokens, parameterized SQL queries
-- **Tests:** Node.js native test runner (`node:test`) for unit and integration suites, pytest + Playwright for automated browser UI tests
-- **CI/CD:** GitHub Actions (Node.js unit tests, React build, Playwright browser test, Docker container build and GHCR publish)
+- **Tests & Quality:** Node.js native test runner (`node:test`) with experimental coverage, ESLint 9+ flat configuration
+- **CI/CD:** GitHub Actions (Node.js unit tests with coverage, ESLint static analysis, React production build, Docker container build and GHCR publish)
 
 ## Getting Started
 
 ### Prerequisites
 - Node.js >= 20 (v22 recommended)
 - npm >= 10
-- Python 3.11+ (for browser UI tests)
 
 ### Running the Application
 
@@ -31,6 +30,7 @@ Testing - Avinash Julakatti
    ```bash
    npm --prefix backend install
    npm --prefix frontend install
+   npm install
    ```
 
 2. **Start Backend Server:**
@@ -50,19 +50,18 @@ Testing - Avinash Julakatti
    npm run build:frontend
    ```
 
-## Running the Tests
+## Running the Tests & Quality Checks
 
-### 1. Backend Unit & API Tests (Node.js)
-Runs all 61 automated tests covering input validation, authentication, event management, registrations, waitlists, tickets, and SQLite database operations:
+### 1. Backend Unit, Service & API Tests (Node.js)
+Runs all 61 automated tests covering input validation, authentication, event management, registrations, waitlists, tickets, and SQLite database operations with full coverage reporting:
 ```bash
 npm test
 ```
 
-### 2. Frontend Browser UI Tests (Python + Playwright)
+### 2. Static Analysis & Linting (ESLint)
+Runs ESLint across backend and frontend code:
 ```bash
-pip install -r frontend/test/requirements.txt   # one time
-playwright install chromium                     # one time
-pytest -v                                       # browser tests against Node.js backend
+npm run lint
 ```
 
 ## Documentation
@@ -71,7 +70,7 @@ All software engineering specifications and architecture models are located in t
 - [Software Architecture Document (SAD)](docs/EMRS_SAD_v1_1_UML_Aligned.pdf)
 - [System Test Plan](docs/EMRS_Test_Plan_v1_1.pdf)
 - [Sprint 1 Test Plan (EMT-20)](docs/Sprint_1_Test_Plan.md)
-- [Branch Protection & CI Quality Gates (EMT-19)](docs/BRANCH_PROTECTION.md)
+- [Branch Protection & CI Quality Gates (EMT-30)](docs/BRANCH_PROTECTION.md)
 - [UML Component Diagram](docs/EMRS_component_diagram_updated.png)
 
 ![EMRS UML Component Diagram](docs/EMRS_component_diagram_updated.png)
@@ -82,7 +81,7 @@ Event_Management_Team7/
 ├── .github/
 │   └── workflows/
 │       ├── cd.yml                  # Publish Docker container to GHCR on main branch merge
-│       ├── ci.yml                  # CI: Node.js tests, React build, Playwright test, Docker build
+│       ├── ci.yml                  # CI: Node.js tests & coverage, ESLint, React build, Docker build
 │       └── codeql.yml              # CodeQL security static analysis
 ├── backend/                        # Node.js + Express backend service
 │   ├── src/
@@ -111,31 +110,30 @@ Event_Management_Team7/
 │   │   ├── pages/                  # Per-tab views (EventsPage, CreateEventPage, CheckInPage, etc.)
 │   │   ├── hooks/                  # Custom React hooks (useEventActions)
 │   │   ├── App.jsx                 # Main application layout
-│   │   └── api.js                  # API client fetch wrappers
-│   ├── test/                       # Frontend browser UI test suite (Python + Playwright)
-│   │   ├── conftest.py             # Server & browser test fixtures
-│   │   ├── helpers.py              # Test helper functions
-│   │   ├── test_auth_ui.py         # Registration & login UI tests
-│   │   ├── test_create_event_ui.py # Event creation UI tests
-│   │   └── requirements.txt        # Playwright dependencies
+│   │   ├── api.js                  # API client fetch wrappers
+│   │   ├── main.jsx                # React root bootstrap
+│   │   └── styles.css              # Application CSS styling
 │   ├── package.json
 │   └── vite.config.js
-├── web/                            # Static web client assets (served by backend)
 ├── docs/                           # Project requirements, architecture specs & test plans
-├── Dockerfile                      # Multi-stage production Dockerfile (Node.js 22)
+├── Dockerfile                      # Multi-stage production Dockerfile (Node.js 22 + React)
+├── eslint.config.js                # Modern flat ESLint configuration
 ├── package.json                    # Root workspace package.json
+├── package-lock.json               # Root lockfile
 └── README.md
 ```
 
 ## Docker
+Build and run the production container:
 ```bash
-docker build -t emrs . && docker run -p 8080:8080 emrs
+docker build -t emrs .
+docker run -p 8080:8080 emrs
 ```
+The container builds the React frontend, runs the Node.js Express server, and serves the frontend on port 8080. Health check endpoint: `GET /api/health`.
 
 ## Workflow
-1. Developer works on one feature branch per Jira story (e.g. `EMRS-1-user-registration`), one commit per story.
-2. Pull request into `test`; CI must be green.
-3. Tester verifies on `test`, then merges `test` into `main`.
-4. Merge to `main` publishes the Docker image (CD).
-
-Commit messages start with the Jira key, e.g. `EMRS-1: Add user registration and validation`.
+1. Developer creates a feature branch per Jira story (e.g. `EMT-30-ci-cd-node-react`), with concise commits prefixed with the story key.
+2. Pull requests target `main` directly.
+3. CI status checks (`Build, unit tests, coverage`, `Static analysis (JavaScript syntax & lint)`, `Docker image builds`) must pass green before merge.
+4. QA / Tester (Avinash Julakatti) and Development Lead (Dhanraj Rathod) review and approve the PR.
+5. Merging to `main` triggers automated container build and publication to GHCR via CD.

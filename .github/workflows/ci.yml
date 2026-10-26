@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [test, main]
+    branches: [main]
   pull_request:
-    branches: [test, main]
+    branches: [main]
 
 jobs:
   build-and-test:
@@ -19,36 +19,17 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies
         run: npm --prefix backend ci
-      - name: Run unit & API tests (Node.js)
+      - name: Run unit & API tests with coverage
         run: npm --prefix backend test
-      - name: Build React frontend
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run build
-
-  frontend-tests:
-    name: Frontend tests (pytest + Playwright)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: backend/package-lock.json
-      - name: Install backend dependencies
-        run: npm --prefix backend ci
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: frontend/test/requirements.txt
-      - name: Install pytest and Playwright
-        run: |
-          pip install -r frontend/test/requirements.txt
-          playwright install --with-deps chromium
-      - name: Run frontend tests
-        run: pytest -v
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build React frontend
+        run: npm --prefix frontend run build
 
   static-analysis:
     name: Static analysis (JavaScript syntax & lint)
@@ -58,7 +39,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Validate JavaScript files syntax
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run ESLint
+        run: npm run lint
+      - name: Validate server syntax
         run: |
           node --check backend/src/server.js
           node --check backend/src/app.js

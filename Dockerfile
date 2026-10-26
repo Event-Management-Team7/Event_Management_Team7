@@ -14,10 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 COPY backend/package*.json ./backend/
 RUN cd backend && npm ci --omit=dev
 COPY backend ./backend
-COPY web ./web
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-ENV EMRS_DB=/data/emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=/app/web
+ENV EMRS_DB=/data/emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=/app/frontend/dist
 RUN mkdir /data && chown -R node:node /data /app
 USER node
 EXPOSE 8080

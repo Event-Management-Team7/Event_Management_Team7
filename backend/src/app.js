@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import { createAuthentication } from './middleware/authentication.js';
 import { createAuthRouter } from './routes/auth.js';
@@ -38,7 +40,13 @@ export function createApp({ db, clock, passwordCost, jwtSecret, mailer, webDir }
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
 
-  const staticDir = webDir ?? process.env.EMRS_WEB_DIR;
+  let staticDir = webDir ?? process.env.EMRS_WEB_DIR;
+  if (!staticDir) {
+    const defaultFrontendDist = path.resolve('frontend/dist');
+    if (fs.existsSync(defaultFrontendDist)) {
+      staticDir = defaultFrontendDist;
+    }
+  }
   if (staticDir) {
     app.use(express.static(staticDir));
   }

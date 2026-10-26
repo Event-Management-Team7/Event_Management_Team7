@@ -33,13 +33,11 @@ npm test
 npm --prefix backend test
 ```
 
-### 2.2 Frontend Browser Tests (EMT-25 & EMT-26)
-Browser tests for the registration and login pages live in `frontend/test/` and use pytest with Playwright (Chromium). The `server_url` fixture starts the real Node.js server (`backend/src/server.js`) on an ephemeral port with an in-memory database and serves `web/`.
-```bash
-pip install -r frontend/test/requirements.txt
-playwright install chromium
-pytest -v
-```
+### 2.2 Frontend Browser Tests (Sprint 1 Archive)
+> **Note (EMT-30):** The legacy HTML5 `web/` client and its associated pytest + Playwright test suite were retired during Sprint 2 (EMT-30) following the full migration to the React SPA (`frontend/`). End-to-end browser tests for the React application are tracked and deferred to **EMT-33**.
+
+The original test cases executed for Sprint 1 sign-off covered:
+
 
 | Jira | Test ID | Description |
 | :--- | :--- | :--- |
@@ -97,12 +95,13 @@ Note: the API stores a single `venue` string and `description`, so the form save
 ### 4.2 Exit Criteria
 1. 100% of automated unit and API tests pass (`npm test`).
 2. Frontend production build completes cleanly (`npm run build:frontend`).
-3. Browser UI tests (`pytest -v`) pass against running server.
-4. QA / Tester (Avinash Julakatti) executes an exploratory pass on the deployed `test` branch.
+3. ESLint static analysis passes without errors (`npm run lint`).
+4. Docker container build and `/api/health` smoke test pass.
 5. All positive and negative test cases documented in Section 3 are verified and signed off.
 
 ---
 
 ## 5. Verification Workflow & Approvals
-- **Verification on `test` branch:** QA / Tester (**Avinash Julakatti**) reviews the automated CI test reports on every PR into `test`. Upon green CI and manual exploratory verification, QA approves the PR.
-- **Merge to `main`:** Merging from `test` into `main` requires QA sign-off and Development Lead (**Dhanraj Rathod**) approval. Merge to `main` automatically triggers container build and publication to GHCR.
+- **Pull Requests to `main`:** All PRs target `main` directly. Required status checks (`Build, unit tests, coverage`, `Static analysis (JavaScript syntax & lint)`, `Docker image builds`) must pass green.
+- **QA Sign-off:** Merging into `main` requires QA sign-off (Avinash Julakatti) and Development Lead approval (Dhanraj Rathod).
+- **Deployment:** Every merge to `main` triggers container build and publication to GHCR via CD workflow.
