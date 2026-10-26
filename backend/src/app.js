@@ -8,10 +8,12 @@ import { AuthService } from './services/auth.js';
 import { EventService } from './services/events.js';
 import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
+import { createMailer } from './services/mailer.js';
 
-export function createApp({ db, clock, passwordCost, jwtSecret } = {}) {
+export function createApp({ db, clock, passwordCost, jwtSecret, mailer } = {}) {
   if (!db) throw new Error('A database instance is required');
 
+  const resolvedMailer = mailer ?? createMailer();
   const authService = new AuthService(db, { clock, cost: passwordCost, jwtSecret });
   const eventService = new EventService(db, clock);
   const registrationService = new RegistrationService(db, clock);
@@ -31,10 +33,10 @@ export function createApp({ db, clock, passwordCost, jwtSecret } = {}) {
   };
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
-  app.use('/api/auth', createAuthRouter({ authService, authentication }));
-  app.use('/api/events', createEventsRouter({ authentication, eventService, registrationService }));
-  app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService }));
-  app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService }));
+  app.use('/api/auth', createAuthRouter({ authService, authentication, mailer: resolvedMailer }));
+  app.use('/api/events', createEventsRouter({ authentication, eventService, registrationService, mailer: resolvedMailer }));
+  app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
+  app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use((error, _req, res, _next) => {
