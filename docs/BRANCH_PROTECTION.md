@@ -19,7 +19,7 @@ The `test` branch serves as the staging branch where integration testing and ver
      - **Require branches to be up to date before merging:** `Enabled`
      - **Required status checks:**
        - `Build, unit tests, coverage` (`build-and-test` job in `.github/workflows/ci.yml`)
-       - `Static analysis (cppcheck)` (`static-analysis` job in `.github/workflows/ci.yml`)
+       - `Static analysis (JavaScript syntax & lint)` (`static-analysis` job in `.github/workflows/ci.yml`)
    - **Require conversation resolution before merging:** `Enabled`
    - **Do not allow bypassing the above settings:** `Enabled` (enforced for Administrators as well)
 
@@ -37,7 +37,7 @@ The `main` branch contains production releases and triggers continuous deploymen
    - **Require status checks to pass before merging:** `Enabled`
      - **Required status checks:**
        - `Build, unit tests, coverage`
-       - `Static analysis (cppcheck)`
+       - `Static analysis (JavaScript syntax & lint)`
        - `Docker image builds`
    - **Do not allow bypassing the above settings:** `Enabled`
 
@@ -45,7 +45,7 @@ The `main` branch contains production releases and triggers continuous deploymen
 
 ## 3. CI Quality Gate Criteria
 A Pull Request check shows a **red status** (failure) if:
-- CMake configuration or compilation fails.
-- Any GoogleTest unit or API test fails during `ctest`.
-- Cppcheck detects any warning, portability, performance issue, or error (`--error-exitcode=1`).
+- Node.js dependencies fail to install or JavaScript syntax errors are detected.
+- Any unit, service, or API test fails during `npm test`.
+- React frontend production build (`npm run build`) fails.
 - Merge is blocked until all required checks turn **green**.

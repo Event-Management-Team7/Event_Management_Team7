@@ -11,26 +11,58 @@ Testing - Avinash Julakatti
 
 **Link to jira space:** https://vaishaliam313.atlassian.net/jira/software/projects/EMT/summary
 
-## Tech stack
-- **Backend:** C++17 REST API ([cpp-httplib](https://github.com/yhirose/cpp-httplib), [nlohmann/json](https://github.com/nlohmann/json)), SQLite3
-- **Security:** PBKDF2-HMAC-SHA256 password hashing (OpenSSL), bearer token sessions, parameterized SQL queries
-- **Frontend:** Responsive HTML5 / CSS3 / JavaScript web client and QR check-in portal served by the backend (`web/`)
-- **Tests:** GoogleTest unit and integration test suites, gcov/gcovr coverage, pytest + Playwright browser tests for the web client
-- **CI/CD:** GitHub Actions (build, test, coverage, cppcheck, CodeQL security scan, Docker build and GHCR publish)
+## Tech Stack
+- **Backend:** Node.js & Express REST API, SQLite3 (`better-sqlite3`)
+- **Frontend:** React.js (Vite) Single-Page Application (`frontend/`) and responsive HTML5 / CSS3 / JavaScript client (`web/`)
+- **Security:** Salted bcrypt password hashing, JWT bearer tokens, parameterized SQL queries
+- **Tests:** Node.js native test runner (`node:test`) for unit and integration suites, pytest + Playwright for automated browser UI tests
+- **CI/CD:** GitHub Actions (Node.js unit tests, React build, Playwright browser test, Docker container build and GHCR publish)
 
-## Running the web client
+## Getting Started
+
+### Prerequisites
+- Node.js >= 20 (v22 recommended)
+- npm >= 10
+- Python 3.11+ (for browser UI tests)
+
+### Running the Application
+
+1. **Install dependencies:**
+   ```bash
+   npm --prefix backend install
+   npm --prefix frontend install
+   ```
+
+2. **Start Backend Server:**
+   ```bash
+   npm run start:backend
+   # Backend runs on http://localhost:8080
+   ```
+
+3. **Start Frontend (Vite Dev Server):**
+   ```bash
+   npm run dev:frontend
+   # Frontend runs on http://localhost:5173 (proxied to backend on 8080)
+   ```
+
+4. **Build Frontend for Production:**
+   ```bash
+   npm run build:frontend
+   ```
+
+## Running the Tests
+
+### 1. Backend Unit & API Tests (Node.js)
+Runs all 61 automated tests covering input validation, authentication, event management, registrations, waitlists, tickets, and SQLite database operations:
 ```bash
-cmake -S . -B build && cmake --build build -j
-EMRS_DB=emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=web ./build/emrs_server
-# open http://localhost:8080
+npm test
 ```
 
-## Running the tests
+### 2. Frontend Browser UI Tests (Python + Playwright)
 ```bash
-ctest --test-dir build --output-on-failure      # C++ unit and API tests
 pip install -r tests/frontend/requirements.txt  # one time
 playwright install chromium                     # one time
-pytest -v                                       # browser tests for web/
+pytest -v                                       # browser tests against Node.js backend
 ```
 
 ## Documentation
@@ -50,80 +82,52 @@ Event_Management_Team7/
 ├── .github/
 │   └── workflows/
 │       ├── cd.yml                  # Publish Docker container to GHCR on main branch merge
-│       ├── ci.yml                  # CI: build, unit tests, coverage, cppcheck, docker smoke test
+│       ├── ci.yml                  # CI: Node.js tests, React build, Playwright test, Docker build
 │       └── codeql.yml              # CodeQL security static analysis
-├── docs/                           # Project requirements, architecture specs, test plan & diagrams
-│   ├── BRANCH_PROTECTION.md        # Branch protection rules & CI quality gate criteria
-│   ├── EMRS_SAD_v1_1_UML_Aligned.pdf
-│   ├── EMRS_Test_Plan_v1_1.pdf
-│   ├── EMRS_component_diagram_updated.png
-│   ├── Software Requirements Specification (SRS).docx
-│   └── Sprint_1_Test_Plan.md       # Sprint 1 test plan (EMT-11, EMT-12, EMT-14)
-├── src/                            # Modular C++17 backend source code
-│   ├── api/                        # REST API routing & request handlers
-│   │   ├── Routes.h
-│   │   └── Routes.cpp
-│   ├── auth/                       # Password hashing & cryptographic utilities
-│   │   ├── PasswordHasher.h
-│   │   └── PasswordHasher.cpp
-│   ├── db/                         # Database connection & schema management
-│   │   ├── Database.h
-│   │   ├── Database.cpp
-│   │   ├── Schema.h
-│   │   └── Schema.cpp
-│   ├── services/                   # Business logic layer
-│   │   ├── AuthService.h
-│   │   ├── AuthService.cpp
-│   │   ├── EventService.h
-│   │   ├── EventService.cpp
-│   │   ├── RegistrationService.h
-│   │   ├── RegistrationService.cpp
-│   │   ├── TicketService.h
-│   │   ├── TicketService.cpp
-│   │   ├── UserService.h
-│   │   └── UserService.cpp
-│   ├── util/                       # Input validation & sanitization
-│   │   ├── Validation.h
-│   │   └── Validation.cpp
-│   └── main.cpp                    # Application entry point & HTTP server
-├── tests/                          # Automated GoogleTest test suites
-│   ├── TestServer.h                # In-memory ephemeral test harness
-│   ├── test_api_event.cpp          # Event creation API & authorization test suite
-│   ├── test_api_login.cpp
-│   ├── test_api_register.cpp
-│   ├── test_auth_service.cpp
-│   ├── test_database.cpp
-│   ├── test_event_service.cpp
-│   ├── test_health.cpp
-│   ├── test_password_hasher.cpp
-│   ├── test_registration_service.cpp
-│   ├── test_ticket_service.cpp
-│   └── test_validation.cpp
-├── web/                            # Responsive presentation layer
-│   ├── app.js                      # Client routing, RSVP, and ticket scanner
-│   ├── index.html                  # Accessible UI (Attendee, Organizer, QR Check-in)
-│   └── style.css                   # Modern dark-mode interface styling
-├── .dockerignore
-├── .gitignore
-├── CMakeLists.txt
-├── Dockerfile
+├── backend/                        # Node.js + Express backend service
+│   ├── src/
+│   │   ├── auth/                   # Passwords and crypto (bcrypt, pbkdf2)
+│   │   ├── db/                     # SQLite connection, schema & migrations
+│   │   ├── middleware/             # JWT authentication middleware
+│   │   ├── routes/                 # Express API route handlers
+│   │   ├── services/               # Business logic (Auth, Events, Registrations, Tickets)
+│   │   ├── util/                   # Input validation and sanitization
+│   │   ├── app.js                  # Express app setup and route configuration
+│   │   └── server.js               # Application HTTP server entry point
+│   ├── test/                       # Node.js automated test suites (node:test)
+│   │   ├── api.test.js             # End-to-end REST API & session test suite
+│   │   ├── auth-service.test.js    # Auth service & password hashing tests
+│   │   ├── database.test.js        # SQLite schema & migration tests
+│   │   ├── event-service.test.js   # Event CRUD & access control tests
+│   │   ├── mailer.test.js          # Email notification tests
+│   │   ├── registration-service.test.js # Registration & waitlist tests
+│   │   ├── ticket-service.test.js  # Ticket & check-in tests
+│   │   └── validation.test.js      # Input validation test suite
+│   ├── package.json
+│   └── package-lock.json
+├── frontend/                       # React.js (Vite) Single-Page Application
+│   ├── src/
+│   │   ├── components/             # Reusable UI components (AuthPanel, EventCard, EventForm, etc.)
+│   │   ├── pages/                  # Per-tab views (EventsPage, CreateEventPage, CheckInPage, etc.)
+│   │   ├── hooks/                  # Custom React hooks (useEventActions)
+│   │   ├── App.jsx                 # Main application layout
+│   │   └── api.js                  # API client fetch wrappers
+│   ├── package.json
+│   └── vite.config.js
+├── tests/                          # Automated frontend browser test suite
+│   ├── frontend/                   # Playwright + Pytest browser test suite
+│   │   ├── conftest.py             # Server & browser test fixtures
+│   │   ├── test_auth_ui.py         # Registration & login UI tests
+│   │   └── test_create_event_ui.py # Event creation UI tests
+│   └── README.md                   # Test architecture overview
+├── web/                            # Static web client assets (served by backend)
+├── docs/                           # Project requirements, architecture specs & test plans
+├── Dockerfile                      # Multi-stage production Dockerfile (Node.js 22)
+├── package.json                    # Root workspace package.json
 └── README.md
 ```
 
-## Build and run
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j
-ctest --test-dir build --output-on-failure
-./build/emrs_server          # http://localhost:8080
-```
-
-Environment variables:
-- `EMRS_PORT` (default `8080`)
-- `EMRS_DB` (default `emrs.db`)
-- `EMRS_WEB_DIR` (default `web`)
-
-Docker:
+## Docker
 ```bash
 docker build -t emrs . && docker run -p 8080:8080 emrs
 ```

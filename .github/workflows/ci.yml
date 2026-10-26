@@ -12,60 +12,32 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ libssl-dev gcovr
-      - name: Cache dependencies
-        uses: actions/cache@v4
+      - uses: actions/setup-node@v4
         with:
-          path: |
-            build/_deps
-            ~/.cache
-          key: ${{ runner.os }}-cmake-deps-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-cmake-deps-
-      - name: Configure (coverage on)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEMRS_COVERAGE=ON
-      - name: Build
-        run: cmake --build build -j"$(nproc)"
-      - name: Run unit tests
-        run: ctest --test-dir build --output-on-failure
-      - name: Coverage report (line + branch)
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+      - name: Run unit & API tests (Node.js)
+        run: npm --prefix backend test
+      - name: Build React frontend
         run: |
-          mkdir -p coverage
-          gcovr -r . --filter 'src/' --exclude 'src/main.cpp' --txt --print-summary \
-                --html-details coverage/index.html --branches --txt-metric branch \
-                > coverage/summary.txt || true
-          gcovr -r . --filter 'src/' --exclude 'src/main.cpp' --print-summary
-          gcovr -r . --filter 'src/' --exclude 'src/main.cpp' --txt-metric branch --print-summary
-          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-            echo "### Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat coverage/summary.txt >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage/
+          npm --prefix frontend ci
+          npm --prefix frontend run build
 
   frontend-tests:
     name: Frontend tests (pytest + Playwright)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ libssl-dev
-      - name: Cache dependencies
-        uses: actions/cache@v4
+      - uses: actions/setup-node@v4
         with:
-          path: build/_deps
-          key: ${{ runner.os }}-cmake-deps-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-cmake-deps-
-      - name: Build server
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEMRS_BUILD_TESTS=OFF
-          cmake --build build -j"$(nproc)" --target emrs_server
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -79,13 +51,18 @@ jobs:
         run: pytest -v
 
   static-analysis:
-    name: Static analysis (cppcheck)
+    name: Static analysis (JavaScript syntax & lint)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y cppcheck
-      - name: cppcheck
-        run: cppcheck --enable=warning,performance,portability --std=c++17 --error-exitcode=1 --inline-suppr -I src src tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate JavaScript files syntax
+        run: |
+          node --check backend/src/server.js
+          node --check backend/src/app.js
+          node --check backend/src/util/validation.js
 
   docker-build:
     name: Docker image builds

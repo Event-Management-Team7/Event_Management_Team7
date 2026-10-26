@@ -28,12 +28,17 @@ def _free_port():
 
 @pytest.fixture(scope="session")
 def server_url():
-    binary = Path(os.environ.get("EMRS_SERVER_BIN", ROOT / "build" / "emrs_server"))
-    if not binary.exists():
-        pytest.skip(f"server binary not found: {binary} (build the project first)")
     port = _free_port()
     env = dict(os.environ, EMRS_DB=":memory:", EMRS_PORT=str(port), EMRS_WEB_DIR=str(ROOT / "web"))
-    proc = subprocess.Popen([str(binary)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    server_bin = os.environ.get("EMRS_SERVER_BIN")
+    if server_bin and Path(server_bin).exists():
+        cmd = [str(server_bin)]
+    else:
+        node_server = ROOT / "backend" / "src" / "server.js"
+        cmd = ["node", str(node_server)]
+
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}"
     for _ in range(50):
         try:
@@ -43,7 +48,7 @@ def server_url():
             time.sleep(0.1)
     else:
         proc.kill()
-        pytest.fail("emrs_server did not become healthy")
+        pytest.fail("EMRS server did not become healthy")
     yield url
     proc.terminate()
     proc.wait(timeout=5)

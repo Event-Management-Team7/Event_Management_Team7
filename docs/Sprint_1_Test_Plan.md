@@ -21,30 +21,25 @@ Sprint 1 covers the following Jira user stories:
 
 ## 2. Test Harness & Automation Infrastructure
 
-### 2.1 Reusable Test Server (`tests/TestServer.h`)
-The automated API test suite uses an ephemeral in-process test server (`TestServer`):
-- Initializes an isolated SQLite in-memory database (`:memory:`) with full schema.
-- Dynamically binds the HTTP server (`cpp-httplib`) to an available ephemeral operating system port (`bind_to_any_port("127.0.0.1")`).
-- Uses reduced PBKDF2 iterations (1,000 iterations instead of 100,000) during test execution to ensure fast test suites.
-- Provides an automated HTTP client (`s.client()`) for sending REST requests and validating responses.
-- Cleans up threads and databases automatically on test fixture destruction.
+### 2.1 Node.js Native Test Runner (`backend/test/`)
+The automated backend and API test suite uses Node.js's native test runner (`node:test`) and strict assertions (`node:assert/strict`):
+- Initializes an isolated SQLite in-memory database (`:memory:`) with full schema migrations.
+- Executes full lifecycle REST API and service tests across validation, authentication, event creation, registration waitlists, and tickets.
+- Fast execution: all 61 tests run in ~1.9 seconds.
 
-### 2.2 GoogleTest & CTest Discovery
-GoogleTest is linked statically and registered with CMake:
 ```bash
-ctest --test-dir build --output-on-failure
+npm test
+# or
+npm --prefix backend test
 ```
-Every test case registered with `TEST(Suite, CaseName)` is automatically discovered and reported in the CI pipeline on every Pull Request.
 
-### 2.3 Frontend Browser Tests (EMT-25)
-Browser tests for the registration and login pages live in `tests/frontend/` and use pytest with Playwright (Chromium). The `server_url` fixture starts the real `emrs_server` binary on a free port with an in-memory database and serves `web/`.
+### 2.2 Frontend Browser Tests (EMT-25 & EMT-26)
+Browser tests for the registration and login pages live in `tests/frontend/` and use pytest with Playwright (Chromium). The `server_url` fixture starts the real Node.js server (`backend/src/server.js`) on an ephemeral port with an in-memory database and serves `web/`.
 ```bash
-cmake -S . -B build && cmake --build build --target emrs_server
 pip install -r tests/frontend/requirements.txt
 playwright install chromium
 pytest -v
 ```
-Set `EMRS_SERVER_BIN` to use a different server binary. The `frontend-tests` job in `ci.yml` runs this on every PR.
 
 | Jira | Test ID | Description |
 | :--- | :--- | :--- |
@@ -94,20 +89,20 @@ Note: the API stores a single `venue` string and `description`, so the form save
 ## 4. Entry and Exit Criteria
 
 ### 4.1 Entry Criteria
-1. Feature branch created adhering to naming convention (e.g., `EMRS-11-user-registration`).
+1. Feature branch created adhering to naming convention (e.g., `EMT-11-user-registration`).
 2. Pull Request submitted targeting the `test` branch.
-3. CMake build completes with no compilation warnings or errors.
+3. Node.js backend tests and React frontend build complete with no errors.
 4. Test environment and ephemeral in-memory database initialize successfully.
 
 ### 4.2 Exit Criteria
-1. 100% of automated unit and API tests pass (`ctest --output-on-failure`).
-2. Code coverage threshold of ≥80% is met across `src/`.
-3. Static analysis (`cppcheck`) passes with 0 warnings/errors (`--error-exitcode=1`).
+1. 100% of automated unit and API tests pass (`npm test`).
+2. Frontend production build completes cleanly (`npm run build:frontend`).
+3. Browser UI tests (`pytest -v`) pass against running server.
 4. QA / Tester (Avinash Julakatti) executes an exploratory pass on the deployed `test` branch.
 5. All positive and negative test cases documented in Section 3 are verified and signed off.
 
 ---
 
 ## 5. Verification Workflow & Approvals
-- **Verification on `test` branch:** QA / Tester (**Avinash Julakatti**) reviews the automated CI test and coverage reports on every PR into `test`. Upon green CI and manual exploratory verification, QA approves the PR.
+- **Verification on `test` branch:** QA / Tester (**Avinash Julakatti**) reviews the automated CI test reports on every PR into `test`. Upon green CI and manual exploratory verification, QA approves the PR.
 - **Merge to `main`:** Merging from `test` into `main` requires QA sign-off and Development Lead (**Dhanraj Rathod**) approval. Merge to `main` automatically triggers container build and publication to GHCR.

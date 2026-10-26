@@ -3,6 +3,39 @@ const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const REGISTRATION_ROLES = new Set(['Attendee', 'Organizer']);
 const REGISTRATION_ROLE_ERROR = 'Role must be Attendee or Organizer.';
 
+export function isValidName(name) {
+  if (typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  return trimmed.length >= 2 && trimmed.length <= 50;
+}
+
+export function isValidEmail(email) {
+  if (typeof email !== 'string') return false;
+  const trimmed = email.trim();
+  return trimmed.length > 0 && trimmed.length <= 254 && EMAIL_PATTERN.test(trimmed);
+}
+
+export function isValidPhone(phone) {
+  if (typeof phone !== 'string') return false;
+  const trimmed = phone.trim();
+  return /^[6-9]\d{9}$/.test(trimmed);
+}
+
+export function isValidPassword(password) {
+  if (typeof password !== 'string') return false;
+  return (
+    password.length >= 8 &&
+    Buffer.byteLength(password, 'utf8') <= 72 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password)
+  );
+}
+
+export function isValidRole(role) {
+  return typeof role === 'string' && REGISTRATION_ROLES.has(role.trim());
+}
+
 export function isObjectBody(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

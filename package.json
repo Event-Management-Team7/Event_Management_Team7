@@ -1,0 +1,13 @@
+{
+  "name": "event-management-team7",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Event Management and Registration System (EMRS)",
+  "scripts": {
+    "test": "npm --prefix backend test",
+    "test:backend": "npm --prefix backend test",
+    "start:backend": "npm --prefix backend start",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev:frontend": "npm --prefix frontend run dev"
+  }
+}

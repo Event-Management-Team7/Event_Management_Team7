@@ -10,7 +10,7 @@ import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
 import { createMailer } from './services/mailer.js';
 
-export function createApp({ db, clock, passwordCost, jwtSecret, mailer } = {}) {
+export function createApp({ db, clock, passwordCost, jwtSecret, mailer, webDir } = {}) {
   if (!db) throw new Error('A database instance is required');
 
   const resolvedMailer = mailer ?? createMailer();
@@ -37,6 +37,11 @@ export function createApp({ db, clock, passwordCost, jwtSecret, mailer } = {}) {
   app.use('/api/events', createEventsRouter({ authentication, eventService, registrationService, mailer: resolvedMailer }));
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
+
+  const staticDir = webDir ?? process.env.EMRS_WEB_DIR;
+  if (staticDir) {
+    app.use(express.static(staticDir));
+  }
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use((error, _req, res, _next) => {
