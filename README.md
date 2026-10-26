@@ -60,7 +60,7 @@ npm test
 
 ### 2. Frontend Browser UI Tests (Python + Playwright)
 ```bash
-pip install -r tests/frontend/requirements.txt  # one time
+pip install -r frontend/test/requirements.txt   # one time
 playwright install chromium                     # one time
 pytest -v                                       # browser tests against Node.js backend
 ```
@@ -112,14 +112,14 @@ Event_Management_Team7/
 │   │   ├── hooks/                  # Custom React hooks (useEventActions)
 │   │   ├── App.jsx                 # Main application layout
 │   │   └── api.js                  # API client fetch wrappers
+│   ├── test/                       # Frontend browser UI test suite (Python + Playwright)
+│   │   ├── conftest.py             # Server & browser test fixtures
+│   │   ├── helpers.py              # Test helper functions
+│   │   ├── test_auth_ui.py         # Registration & login UI tests
+│   │   ├── test_create_event_ui.py # Event creation UI tests
+│   │   └── requirements.txt        # Playwright dependencies
 │   ├── package.json
 │   └── vite.config.js
-├── tests/                          # Automated frontend browser test suite
-│   ├── frontend/                   # Playwright + Pytest browser test suite
-│   │   ├── conftest.py             # Server & browser test fixtures
-│   │   ├── test_auth_ui.py         # Registration & login UI tests
-│   │   └── test_create_event_ui.py # Event creation UI tests
-│   └── README.md                   # Test architecture overview
 ├── web/                            # Static web client assets (served by backend)
 ├── docs/                           # Project requirements, architecture specs & test plans
 ├── Dockerfile                      # Multi-stage production Dockerfile (Node.js 22)

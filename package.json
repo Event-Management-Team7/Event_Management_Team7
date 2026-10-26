@@ -6,6 +6,7 @@
   "scripts": {
     "test": "npm --prefix backend test",
     "test:backend": "npm --prefix backend test",
+    "test:frontend": "pytest",
     "start:backend": "npm --prefix backend start",
     "build:frontend": "npm --prefix frontend run build",
     "dev:frontend": "npm --prefix frontend run dev"

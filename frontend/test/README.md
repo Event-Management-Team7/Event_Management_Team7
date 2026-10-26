@@ -27,7 +27,7 @@ npm --prefix backend test
 ---
 
 ## 2. Frontend & Browser UI Tests (Python / Playwright)
-Located in [`tests/frontend/`](./frontend/). Built using Python (`pytest` + `playwright`) to test user journeys against the running server.
+Located in [`frontend/test/`](./). Built using Python (`pytest` + `playwright`) to test user journeys against the running server.
 
 ### Test Suites:
 - `test_auth_ui.py`: Authentication, registration modals, inline errors, focus traps, session persistence.
@@ -35,8 +35,8 @@ Located in [`tests/frontend/`](./frontend/). Built using Python (`pytest` + `pla
 
 ### How to Run:
 ```bash
-pip install -r tests/frontend/requirements.txt
+pip install -r frontend/test/requirements.txt
 playwright install chromium
 pytest -v
 ```
-The test harness in `tests/frontend/conftest.py` automatically spins up the Node.js backend server (`node backend/src/server.js`) on an ephemeral port with an in-memory database.
+The test harness in `frontend/test/conftest.py` automatically spins up the Node.js backend server (`node backend/src/server.js`) on an ephemeral port with an in-memory database.

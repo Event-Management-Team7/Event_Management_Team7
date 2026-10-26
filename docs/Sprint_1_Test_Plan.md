@@ -34,9 +34,9 @@ npm --prefix backend test
 ```
 
 ### 2.2 Frontend Browser Tests (EMT-25 & EMT-26)
-Browser tests for the registration and login pages live in `tests/frontend/` and use pytest with Playwright (Chromium). The `server_url` fixture starts the real Node.js server (`backend/src/server.js`) on an ephemeral port with an in-memory database and serves `web/`.
+Browser tests for the registration and login pages live in `frontend/test/` and use pytest with Playwright (Chromium). The `server_url` fixture starts the real Node.js server (`backend/src/server.js`) on an ephemeral port with an in-memory database and serves `web/`.
 ```bash
-pip install -r tests/frontend/requirements.txt
+pip install -r frontend/test/requirements.txt
 playwright install chromium
 pytest -v
 ```
