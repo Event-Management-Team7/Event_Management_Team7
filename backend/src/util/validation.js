@@ -222,3 +222,54 @@ export function parsePositiveId(value) {
   const id = Number(value);
   return Number.isSafeInteger(id) ? id : null;
 }
+
+const FILTER_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MAX_LOCATION_LENGTH = 200;
+
+function isValidCalendarDate(value) {
+  const match = FILTER_DATE_PATTERN.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+// Validates the optional `from`, `to` (YYYY-MM-DD, inclusive) and `location` query parameters of
+// GET /api/events. A missing or blank value means "no filter". Returns the cleaned filters plus a
+// `fields` map naming each invalid parameter, in the same shape as validateEvent.
+export function validateEventFilters(query = {}) {
+  const fields = {};
+  const filters = {};
+
+  for (const name of ['from', 'to']) {
+    const raw = query[name];
+    if (raw === undefined) continue;
+    const value = typeof raw === 'string' ? raw.trim() : null;
+    if (value === '') continue;
+    if (value === null || !isValidCalendarDate(value)) {
+      fields[name] = `${name} must be a valid date in YYYY-MM-DD format.`;
+    } else {
+      filters[name] = value;
+    }
+  }
+
+  if (filters.from && filters.to && filters.from > filters.to) {
+    fields.from = 'from must not be after to.';
+  }
+
+  if (query.location !== undefined) {
+    if (typeof query.location !== 'string') {
+      fields.location = 'location must be a single text value.';
+    } else {
+      const location = query.location.trim();
+      if (location.length > MAX_LOCATION_LENGTH) {
+        fields.location = `location must be at most ${MAX_LOCATION_LENGTH} characters.`;
+      } else if (location) {
+        filters.location = location;
+      }
+    }
+  }
+
+  return { filters, fields };
+}

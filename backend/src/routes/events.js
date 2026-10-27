@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { isObjectBody, parsePositiveId, validateEvent } from '../util/validation.js';
+import { isObjectBody, parsePositiveId, validateEvent, validateEventFilters } from '../util/validation.js';
 
 function eventRole(req, res, next) {
   if (req.user.role !== 'Organizer' && req.user.role !== 'Admin') {
@@ -21,10 +21,16 @@ export function createEventsRouter({ authentication, eventService, registrationS
   const router = Router();
 
   router.get('/', (req, res) => {
+    const { filters, fields } = validateEventFilters(req.query);
+    if (Object.keys(fields).length) {
+      res.status(400).json({ error: 'Validation failed', fields });
+      return;
+    }
     res.status(200).json({
       events: eventService.list({
         category: typeof req.query.category === 'string' ? req.query.category : '',
-        search: typeof req.query.search === 'string' ? req.query.search : ''
+        search: typeof req.query.search === 'string' ? req.query.search : '',
+        ...filters
       })
     });
   });

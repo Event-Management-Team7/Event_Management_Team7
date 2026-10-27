@@ -93,3 +93,80 @@ test('EventService: organizer authorization and access control', (t) => {
   assert.equal(events.get(99999), null);
   assert.equal(events.cancel(99999, { id: org1.id, role: org1.role }), 'not-found');
 });
+
+function seedFilterEvents(db) {
+  const auth = new AuthService(db, { cost: 4 });
+  const events = new EventService(db);
+  const organizer = auth.register({
+    name: 'Filter Organizer',
+    email: 'filters@example.com',
+    password: 'SecurePassword123',
+    role: 'Organizer'
+  });
+  const make = (title, day, venue, category = 'Workshop') => events.create(organizer.id, {
+    title,
+    description: 'Filter fixture',
+    category,
+    startDateTime: `2026-11-${day}T10:00:00Z`,
+    endDateTime: `2026-11-${day}T12:00:00Z`,
+    venueType: 'Physical',
+    venue,
+    capacity: 50,
+    ticketTypes: [{ name: 'Standard', price: 0, quantity: 50 }]
+  });
+  const ids = {
+    nov1: make('Early Event', '01', 'Auditorium Hall A', 'Conference'),
+    nov10: make('Middle Event', '10', 'Auditorium Hall A'),
+    nov20: make('Late Event', '20', 'City Park')
+  };
+  return { events, organizer, ids };
+}
+
+test('EventService: filters by date range with inclusive boundaries', (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const { events, ids } = seedFilterEvents(db);
+
+  assert.deepEqual(events.list({ from: '2026-11-05', to: '2026-11-15' }).map((e) => e.id), [ids.nov10]);
+  assert.deepEqual(events.list({ from: '2026-11-10', to: '2026-11-10' }).map((e) => e.id), [ids.nov10]);
+  assert.deepEqual(events.list({ from: '2026-11-01', to: '2026-11-20' }).map((e) => e.id), [ids.nov1, ids.nov10, ids.nov20]);
+  assert.deepEqual(events.list({ from: '2026-11-10' }).map((e) => e.id), [ids.nov10, ids.nov20]);
+  assert.deepEqual(events.list({ to: '2026-11-10' }).map((e) => e.id), [ids.nov1, ids.nov10]);
+  assert.deepEqual(events.list({ from: '2027-01-01' }), []);
+});
+
+test('EventService: filters by location case-insensitively and treats wildcards literally', (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const { events, ids } = seedFilterEvents(db);
+
+  assert.deepEqual(events.list({ location: 'hall a' }).map((e) => e.id), [ids.nov1, ids.nov10]);
+  assert.deepEqual(events.list({ location: 'CITY' }).map((e) => e.id), [ids.nov20]);
+  assert.deepEqual(events.list({ location: 'Nowhere' }), []);
+  assert.deepEqual(events.list({ location: '%' }), [], 'a % in the input must not match everything');
+  assert.deepEqual(events.list({ location: '_' }), [], 'a _ in the input must not match any character');
+});
+
+test('EventService: date, location, category and search filters combine with AND', (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const { events, ids } = seedFilterEvents(db);
+
+  assert.deepEqual(
+    events.list({ from: '2026-11-05', to: '2026-11-30', location: 'hall a' }).map((e) => e.id),
+    [ids.nov10]
+  );
+  assert.deepEqual(events.list({ location: 'hall a', category: 'Conference' }).map((e) => e.id), [ids.nov1]);
+  assert.deepEqual(events.list({ location: 'hall a', search: 'Middle', from: '2026-11-01' }).map((e) => e.id), [ids.nov10]);
+  assert.deepEqual(events.list({ location: 'city park', to: '2026-11-15' }), []);
+});
+
+test('EventService: cancelled events are never returned by any filter', (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const { events, organizer, ids } = seedFilterEvents(db);
+
+  events.cancel(ids.nov10, { id: organizer.id, role: organizer.role });
+  assert.deepEqual(events.list({ from: '2026-11-05', to: '2026-11-15' }), []);
+  assert.deepEqual(events.list({ location: 'hall a' }).map((e) => e.id), [ids.nov1]);
+});
