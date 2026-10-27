@@ -786,3 +786,103 @@ test('check-in validates ticket codes, allows organizer access, and rejects repe
   assert.equal(ticket.status, 200);
   assert.equal(ticket.body.checkedIn, true);
 });
+
+async function seedFilterApi(app, db) {
+  const organizer = await createUser(app, { email: 'filter-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const make = async (title, day, address, category = 'Workshop') => {
+    const response = await createEvent(app, organizer.token, {
+      title,
+      category,
+      address,
+      startDateTime: `2099-11-${day}T10:00`,
+      endDateTime: `2099-11-${day}T12:00`
+    });
+    assert.equal(response.status, 201, response.text);
+    return response.body.eventId;
+  };
+  return {
+    organizer,
+    nov1: await make('Early Event', '01', 'Auditorium Hall A', 'Conference'),
+    nov10: await make('Middle Event', '10', 'Auditorium Hall A'),
+    nov20: await make('Late Event', '20', 'City Park')
+  };
+}
+
+const ids = (response) => response.body.events.map((event) => event.id);
+
+test('GET /api/events filters by date range, both dates inclusive', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const seeded = await seedFilterApi(app, db);
+
+  const range = await request(app).get('/api/events?from=2099-11-05&to=2099-11-15');
+  assert.equal(range.status, 200);
+  assert.deepEqual(ids(range), [seeded.nov10]);
+
+  const exact = await request(app).get('/api/events?from=2099-11-01&to=2099-11-20');
+  assert.deepEqual(ids(exact), [seeded.nov1, seeded.nov10, seeded.nov20]);
+
+  assert.deepEqual(ids(await request(app).get('/api/events?from=2099-11-10')), [seeded.nov10, seeded.nov20]);
+  assert.deepEqual(ids(await request(app).get('/api/events?to=2099-11-10')), [seeded.nov1, seeded.nov10]);
+  assert.deepEqual(ids(await request(app).get('/api/events?from=&to=')), [seeded.nov1, seeded.nov10, seeded.nov20]);
+});
+
+test('GET /api/events filters by location, ignoring case', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const seeded = await seedFilterApi(app, db);
+
+  assert.deepEqual(ids(await request(app).get('/api/events?location=hall%20a')), [seeded.nov1, seeded.nov10]);
+  assert.deepEqual(ids(await request(app).get('/api/events?location=CITY')), [seeded.nov20]);
+  assert.deepEqual(ids(await request(app).get('/api/events?location=nowhere')), []);
+});
+
+test('GET /api/events combines date, location, category and search with AND', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const seeded = await seedFilterApi(app, db);
+
+  const combined = await request(app).get('/api/events?from=2099-11-05&to=2099-11-30&location=hall%20a');
+  assert.deepEqual(ids(combined), [seeded.nov10]);
+  assert.deepEqual(ids(await request(app).get('/api/events?location=hall%20a&category=Conference')), [seeded.nov1]);
+  assert.deepEqual(ids(await request(app).get('/api/events?location=hall%20a&search=Middle&from=2099-11-01')), [seeded.nov10]);
+  assert.deepEqual(ids(await request(app).get('/api/events?location=city&to=2099-11-15')), []);
+});
+
+test('GET /api/events never returns cancelled events when filtering', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const seeded = await seedFilterApi(app, db);
+
+  const cancelled = await request(app)
+    .delete(`/api/events/${seeded.nov10}`)
+    .set('Authorization', `Bearer ${seeded.organizer.token}`);
+  assert.equal(cancelled.status, 200);
+  assert.deepEqual(ids(await request(app).get('/api/events?from=2099-11-05&to=2099-11-15')), []);
+  assert.deepEqual(ids(await request(app).get('/api/events?location=hall%20a')), [seeded.nov1]);
+});
+
+test('GET /api/events rejects invalid filters with 400 naming the field', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await seedFilterApi(app, db);
+
+  const cases = [
+    ['from=not-a-date', ['from']],
+    ['to=2099-13-01', ['to']],
+    ['from=2099-02-30', ['from']],
+    ['from=2099-11-20T10:00', ['from']],
+    ['from=2099-11-15&to=2099-11-05', ['from']],
+    ['from=bad&to=worse', ['from', 'to']],
+    ['from=2099-11-01&from=2099-11-02', ['from']],
+    [`location=${'x'.repeat(201)}`, ['location']],
+    ['location=a&location=b', ['location']]
+  ];
+  for (const [query, expected] of cases) {
+    const response = await request(app).get(`/api/events?${query}`);
+    assert.equal(response.status, 400, query);
+    assert.equal(response.body.error, 'Validation failed', query);
+    assert.deepEqual(Object.keys(response.body.fields).sort(), expected, query);
+  }
+});

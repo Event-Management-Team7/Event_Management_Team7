@@ -36,11 +36,15 @@ h1 { margin: 10px 0 8px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin: 34px 0 16px; }
 h2 { margin: 5px 0 0; font-size: 23px; letter-spacing: -.025em; }
 h3 { margin: 12px 0 8px; font-size: 18px; }
-.filters { display: flex; gap: 12px; margin-bottom: 18px; }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 18px; }
 input, select, textarea { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #dfe3ed; border-radius: 9px; background: white; color: #283247; outline: none; }
 input:focus, select:focus, textarea:focus { border-color: #8279ee; box-shadow: 0 0 0 3px #eeeaff; }
 .filters input { flex: 1; }
 .filters select { max-width: 220px; }
+.filter-field { display: grid; gap: 4px; flex: 0 1 170px; color: #778196; font-size: 12px; }
+.filter-field.filter-location { flex: 1 1 200px; }
+.filters button { min-height: 42px; }
+.filters button:disabled { opacity: .5; cursor: not-allowed; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
 .card, .auth-card { border: 1px solid #e3e7ef; border-radius: 14px; background: white; box-shadow: 0 6px 20px #25304b08; }
 .event-card { display: flex; flex-direction: column; padding: 20px; }
@@ -96,6 +100,7 @@ footer { padding: 18px 0 28px; border-top: 1px solid #e1e6ef; color: #8b93a2; fo
   .welcome-count { flex-direction: row; gap: 10px; }
   .filters, .form-row { grid-template-columns: 1fr; flex-direction: column; }
   .filters select { max-width: none; }
+  .filter-field, .filter-field.filter-location { flex: 1 1 auto; }
   .checkin form { grid-template-columns: 1fr; }
   .identity { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 }
