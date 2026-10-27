@@ -14,13 +14,12 @@ jobs:
     permissions:
       security-events: write
       contents: read
+
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y cmake g++ libssl-dev
+
       - uses: github/codeql-action/init@v3
         with:
-          languages: c-cpp
-      - run: |
-          cmake -S . -B build -DEMRS_BUILD_TESTS=OFF
-          cmake --build build -j"$(nproc)"
+          languages: javascript-typescript
+
       - uses: github/codeql-action/analyze@v3
