@@ -25,7 +25,8 @@ export class RegistrationService {
   register(eventId, userId) {
     return this.db.transaction(() => {
       const event = this.db.get(
-        'SELECT capacity, status, start_datetime, event_date, start_time FROM events WHERE id = ?',
+        `SELECT capacity, status, title, event_date, start_time, start_datetime
+         FROM events WHERE id = ?`,
         [eventId]
       );
       if (!event) return { result: 'not-found' };
@@ -52,6 +53,7 @@ export class RegistrationService {
       const status = count < event.capacity ? 'confirmed' : 'waitlist';
       const now = this.clock();
       let registrationId;
+
       if (existing) {
         registrationId = existing.id;
         this.db.run('UPDATE registrations SET status = ?, created_at = ? WHERE id = ?', [
@@ -68,12 +70,19 @@ export class RegistrationService {
       }
 
       if (status === 'confirmed') {
+        const attendee = this.db.get('SELECT email FROM users WHERE id = ?', [userId]);
         return {
           result: status,
           registrationId,
-          ticketCode: issueTicket(this.db, registrationId, eventId, userId)
+          ticketCode: issueTicket(this.db, registrationId, eventId, userId),
+          email: attendee.email,
+          eventTitle: event.title,
+          eventDateTime: event.start_datetime || (
+            event.start_time ? `${event.event_date}T${event.start_time}` : event.event_date
+          )
         };
       }
+
       return { result: status, registrationId };
     });
   }
@@ -91,7 +100,9 @@ export class RegistrationService {
       if (!registration || registration.status === 'cancelled') return false;
 
       const startIso = registration.start_datetime || (
-        registration.start_time ? `${registration.event_date}T${registration.start_time}` : registration.event_date
+        registration.start_time
+          ? `${registration.event_date}T${registration.start_time}`
+          : registration.event_date
       );
       const startTimeSec = Math.floor(new Date(startIso).getTime() / 1000);
       if (startTimeSec && startTimeSec <= this.clock()) {
@@ -99,6 +110,7 @@ export class RegistrationService {
       }
 
       this.db.run("UPDATE registrations SET status = 'cancelled' WHERE id = ?", [registrationId]);
+
       if (registration.status === 'confirmed') {
         const next = this.db.get(
           `SELECT id, user_id FROM registrations
@@ -106,11 +118,13 @@ export class RegistrationService {
            ORDER BY created_at ASC, id ASC LIMIT 1`,
           [registration.event_id]
         );
+
         if (next) {
           this.db.run("UPDATE registrations SET status = 'confirmed' WHERE id = ?", [next.id]);
           issueTicket(this.db, next.id, registration.event_id, next.user_id);
         }
       }
+
       return true;
     });
   }

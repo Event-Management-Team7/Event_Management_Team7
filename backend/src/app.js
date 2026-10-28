@@ -12,7 +12,17 @@ import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
 import { createMailer } from './services/mailer.js';
 
-export function createApp({ db, clock, passwordCost, jwtSecret, mailer, webDir } = {}) {
+export function createApp({
+  db,
+  clock,
+  passwordCost,
+  jwtSecret,
+  mailer,
+  appBaseUrl,
+  webDir,
+  protectedRouteRateLimitOptions,
+  publicAuthRateLimitOptions = {}
+} = {}) {
   if (!db) throw new Error('A database instance is required');
 
   const resolvedMailer = mailer ?? createMailer();
@@ -35,8 +45,21 @@ export function createApp({ db, clock, passwordCost, jwtSecret, mailer, webDir }
   };
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
-  app.use('/api/auth', createAuthRouter({ authService, authentication, mailer: resolvedMailer }));
-  app.use('/api/events', createEventsRouter({ authentication, eventService, registrationService, mailer: resolvedMailer }));
+  app.use('/api/auth', createAuthRouter({
+    authService,
+    authentication,
+    mailer: resolvedMailer,
+    appBaseUrl: appBaseUrl ?? process.env.APP_BASE_URL,
+    protectedRouteRateLimitOptions,
+    publicAuthRateLimitOptions
+  }));
+  app.use('/api/events', createEventsRouter({
+    authentication,
+    eventService,
+    registrationService,
+    mailer: resolvedMailer,
+    registrationRateLimitOptions: protectedRouteRateLimitOptions
+  }));
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
 

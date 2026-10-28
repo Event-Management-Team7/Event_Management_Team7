@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
+import { createRateLimitOptions } from '../middleware/rateLimiting.js';
+import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, parsePositiveId, validateEvent, validateEventFilters } from '../util/validation.js';
 
 function eventRole(req, res, next) {
@@ -17,7 +20,13 @@ function organizerOnly(req, res, next) {
   next();
 }
 
-export function createEventsRouter({ authentication, eventService, registrationService }) {
+export function createEventsRouter({
+  authentication,
+  eventService,
+  registrationService,
+  mailer,
+  registrationRateLimitOptions
+}) {
   const router = Router();
 
   router.get('/', (req, res) => {
@@ -76,7 +85,10 @@ export function createEventsRouter({ authentication, eventService, registrationS
     }
   });
 
-  router.post('/:id/register', authentication.authenticate, (req, res, next) => {
+  router.post('/:id/register', rateLimit(createRateLimitOptions(
+    100,
+    registrationRateLimitOptions
+  )), authentication.authenticate, async (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });
@@ -93,6 +105,15 @@ export function createEventsRouter({ authentication, eventService, registrationS
       } else if (result.result === 'already-registered') {
         res.status(409).json({ error: 'You are already registered for this event' });
       } else if (result.result === 'confirmed') {
+        await sendMailSafely(mailer, {
+          to: result.email,
+          subject: `Registration confirmed: ${result.eventTitle}`,
+          text: [
+            `Your registration for ${result.eventTitle} is confirmed.`,
+            `Event date and time: ${result.eventDateTime}`,
+            `Ticket code: ${result.ticketCode}`
+          ].join('\n')
+        });
         res.status(200).json({
           status: 'confirmed',
           registrationId: result.registrationId,

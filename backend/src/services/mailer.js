@@ -1,3 +1,5 @@
+import nodemailer from 'nodemailer';
+
 const DEFAULT_TRANSPORT = 'memory';
 
 function createMemoryTransport() {
@@ -18,23 +20,49 @@ function createMemoryTransport() {
   };
 }
 
-function createSmtpTransport() {
+function requiredSetting(env, name) {
+  const value = env[name];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${name} is required when MAIL_TRANSPORT=smtp`);
+  }
+  return value;
+}
+
+function createSmtpTransport({ env, smtpTransportFactory }) {
+  const host = requiredSetting(env, 'SMTP_HOST');
+  const portValue = requiredSetting(env, 'SMTP_PORT');
+  const port = Number(portValue);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('SMTP_PORT must be an integer between 1 and 65535');
+  }
+  const user = requiredSetting(env, 'SMTP_USER');
+  const pass = requiredSetting(env, 'SMTP_PASS');
+  const from = requiredSetting(env, 'MAIL_FROM');
+  const transport = smtpTransportFactory({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass }
+  });
+
   return {
-    async sendMail() {
-      throw new Error('SMTP mail transport is not configured');
+    async sendMail({ to, subject, text }) {
+      return transport.sendMail({ from, to, subject, text });
     }
   };
 }
 
 export function createMailer({
-  transport = process.env.MAIL_TRANSPORT ?? DEFAULT_TRANSPORT
+  transport = process.env.MAIL_TRANSPORT ?? DEFAULT_TRANSPORT,
+  env = process.env,
+  smtpTransportFactory = nodemailer.createTransport
 } = {}) {
   let selectedTransport;
 
   if (transport === 'memory') {
     selectedTransport = createMemoryTransport();
   } else if (transport === 'smtp') {
-    selectedTransport = createSmtpTransport();
+    selectedTransport = createSmtpTransport({ env, smtpTransportFactory });
   } else {
     throw new Error(`Unsupported MAIL_TRANSPORT: ${transport}`);
   }
@@ -43,12 +71,8 @@ export function createMailer({
     async sendMail({ to, subject, text }) {
       try {
         return await selectedTransport.sendMail({ to, subject, text });
-      } catch (error) {
-        console.error('Email delivery failed:', {
-          to,
-          subject,
-          error: error instanceof Error ? error.message : String(error)
-        });
+      } catch {
+        console.error('Email delivery failed');
         return null;
       }
     },
@@ -61,4 +85,12 @@ export function createMailer({
       selectedTransport.clear?.();
     }
   };
+}
+
+export async function sendMailSafely(mailer, message) {
+  try {
+    await mailer.sendMail(message);
+  } catch {
+    console.error('Email delivery failed');
+  }
 }

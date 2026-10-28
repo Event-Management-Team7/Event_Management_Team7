@@ -1,10 +1,23 @@
 import { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
+import { createRateLimitOptions } from '../middleware/rateLimiting.js';
+import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, validateRegistration } from '../util/validation.js';
 
-export function createAuthRouter({ authService, authentication }) {
+export function createAuthRouter({
+  authService,
+  authentication,
+  mailer,
+  appBaseUrl,
+  protectedRouteRateLimitOptions,
+  publicAuthRateLimitOptions = {}
+}) {
   const router = Router();
 
-  router.post('/register', (req, res, next) => {
+  router.post('/register', rateLimit(createRateLimitOptions(
+    5,
+    publicAuthRateLimitOptions.registration
+  )), async (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -31,13 +44,54 @@ export function createAuthRouter({ authService, authentication }) {
         res.status(409).json({ error: 'Email already registered' });
         return;
       }
+      const token = authService.createEmailVerificationToken(user.id);
+      if (!appBaseUrl) {
+        console.error('Email delivery failed');
+      } else {
+        try {
+          const verificationUrl = new URL('/api/auth/verify-email', appBaseUrl);
+          verificationUrl.searchParams.set('token', token);
+          await sendMailSafely(mailer, {
+            to: user.email,
+            subject: 'Verify your EMRS email address',
+            text: [
+              'Please verify your email address for Event Management and Registration System (EMRS).',
+              '',
+              `Verify your email address: ${verificationUrl.toString()}`,
+              '',
+              'If you did not create this account, you can ignore this message.'
+            ].join('\n')
+          });
+        } catch {
+          console.error('Email delivery failed');
+        }
+      }
       res.status(201).json({ message: 'Registration successful', user });
     } catch (error) {
       next(error);
     }
   });
 
-  router.post('/login', (req, res, next) => {
+  router.get('/verify-email', rateLimit(createRateLimitOptions(
+    30,
+    publicAuthRateLimitOptions.verification
+  )), (req, res, next) => {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    try {
+      if (!authService.verifyEmail(token)) {
+        res.status(400).json({ error: 'Invalid or expired email verification token' });
+        return;
+      }
+      res.status(200).json({ message: 'Email verified successfully' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post('/login', rateLimit(createRateLimitOptions(
+    10,
+    publicAuthRateLimitOptions.login
+  )), (req, res, next) => {
     if (!isObjectBody(req.body)) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -86,7 +140,10 @@ export function createAuthRouter({ authService, authentication }) {
     }
   });
 
-  router.get('/me', authentication.authenticate, (req, res) => {
+  router.get('/me', rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), authentication.authenticate, (req, res) => {
     const { id, name, email, phone, role } = req.user;
     res.status(200).json({ user: { id, name, email, phone, role } });
   });

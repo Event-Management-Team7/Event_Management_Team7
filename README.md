@@ -131,6 +131,23 @@ docker run -p 8080:8080 emrs
 ```
 The container builds the React frontend, runs the Node.js Express server, and serves the frontend on port 8080. Health check endpoint: `GET /api/health`.
 
+### Email configuration (EMT-52)
+
+The backend defaults to `MAIL_TRANSPORT=memory`, which keeps messages in process memory and is intended for tests and local development; it does not deliver email. Set `MAIL_TRANSPORT=smtp` to enable delivery through Nodemailer. SMTP mode requires valid configuration:
+
+- `SMTP_HOST` — SMTP server host
+- `SMTP_PORT` — SMTP server port (for example, `587` or `465`)
+- `SMTP_USER` — SMTP authentication username
+- `SMTP_PASS` — SMTP authentication password
+- `MAIL_FROM` — sender address/name
+- `APP_BASE_URL` — public application base URL used to construct email verification links (for example, `https://events.example.com`, or `http://localhost:8080` for local development)
+
+Keep SMTP credentials in the environment rather than committing them to source control. Configure all SMTP settings before selecting `MAIL_TRANSPORT=smtp`.
+
+On registration, EMRS sends a plain-text email asking the user to verify their email address. The link uses `APP_BASE_URL`; verification tokens are single-use and expire after 24 hours. Login does not require email verification. A successful event registration sends a plain-text confirmation with the event title, date/time, and ticket code. Waitlisted registrations do not receive a confirmed-registration email.
+
+EMT-52 tests cover SMTP configuration and mocked delivery, verification email content and token handling, registration confirmation content, waitlist behavior, and email-failure isolation. Waitlist promotion and event cancellation emails are deferred to EMT-47; password-reset emails are deferred to EMT-13.
+
 ## Workflow
 1. Developer creates a feature branch per Jira story (e.g. `EMT-30-ci-cd-node-react`), with concise commits prefixed with the story key.
 2. Pull requests target `main` directly.
