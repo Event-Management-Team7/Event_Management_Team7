@@ -1,0 +1,18 @@
+{
+  "name": "event-management-team7",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Event Management and Registration System (EMRS)",
+  "scripts": {
+    "test": "npm --prefix backend test",
+    "test:backend": "npm --prefix backend test",
+    "lint": "eslint backend/src backend/test frontend/src",
+    "start:backend": "npm --prefix backend start",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev:frontend": "npm --prefix frontend run dev"
+  },
+  "devDependencies": {
+    "eslint": "^9.13.0"
+  }
+}

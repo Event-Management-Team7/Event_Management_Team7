@@ -1,19 +1,24 @@
-FROM ubuntu:24.04 AS build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      cmake g++ make libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-COPY . .
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEMRS_BUILD_TESTS=OFF \
- && cmake --build build -j"$(nproc)" --target emrs_server
+FROM node:22-bookworm-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
-FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y --no-install-recommends libssl3t64 curl && rm -rf /var/lib/apt/lists/* \
- && useradd -r -u 10001 emrs && mkdir /data && chown emrs /data
+FROM node:22-bookworm-slim
 WORKDIR /app
-COPY --from=build /src/build/emrs_server /app/emrs_server
-COPY web /app/web
-USER emrs
-ENV EMRS_DB=/data/emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=/app/web
+ENV NODE_ENV=production
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY backend/package*.json ./backend/
+RUN cd backend && npm ci --omit=dev
+COPY backend ./backend
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+ENV EMRS_DB=/data/emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=/app/frontend/dist
+RUN mkdir /data && chown -R node:node /data /app
+USER node
 EXPOSE 8080
 VOLUME /data
-CMD ["/app/emrs_server"]
+CMD ["node", "backend/src/server.js"]

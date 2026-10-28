@@ -3,6 +3,39 @@ const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const REGISTRATION_ROLES = new Set(['Attendee', 'Organizer']);
 const REGISTRATION_ROLE_ERROR = 'Role must be Attendee or Organizer.';
 
+export function isValidName(name) {
+  if (typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  return trimmed.length >= 2 && trimmed.length <= 50;
+}
+
+export function isValidEmail(email) {
+  if (typeof email !== 'string') return false;
+  const trimmed = email.trim();
+  return trimmed.length > 0 && trimmed.length <= 254 && EMAIL_PATTERN.test(trimmed);
+}
+
+export function isValidPhone(phone) {
+  if (typeof phone !== 'string') return false;
+  const trimmed = phone.trim();
+  return /^[6-9]\d{9}$/.test(trimmed);
+}
+
+export function isValidPassword(password) {
+  if (typeof password !== 'string') return false;
+  return (
+    password.length >= 8 &&
+    Buffer.byteLength(password, 'utf8') <= 72 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password)
+  );
+}
+
+export function isValidRole(role) {
+  return typeof role === 'string' && REGISTRATION_ROLES.has(role.trim());
+}
+
 export function isObjectBody(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -188,4 +221,55 @@ export function parsePositiveId(value) {
   if (!/^[1-9]\d*$/.test(value)) return null;
   const id = Number(value);
   return Number.isSafeInteger(id) ? id : null;
+}
+
+const FILTER_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MAX_LOCATION_LENGTH = 200;
+
+function isValidCalendarDate(value) {
+  const match = FILTER_DATE_PATTERN.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+// Validates the optional `from`, `to` (YYYY-MM-DD, inclusive) and `location` query parameters of
+// GET /api/events. A missing or blank value means "no filter". Returns the cleaned filters plus a
+// `fields` map naming each invalid parameter, in the same shape as validateEvent.
+export function validateEventFilters(query = {}) {
+  const fields = {};
+  const filters = {};
+
+  for (const name of ['from', 'to']) {
+    const raw = query[name];
+    if (raw === undefined) continue;
+    const value = typeof raw === 'string' ? raw.trim() : null;
+    if (value === '') continue;
+    if (value === null || !isValidCalendarDate(value)) {
+      fields[name] = `${name} must be a valid date in YYYY-MM-DD format.`;
+    } else {
+      filters[name] = value;
+    }
+  }
+
+  if (filters.from && filters.to && filters.from > filters.to) {
+    fields.from = 'from must not be after to.';
+  }
+
+  if (query.location !== undefined) {
+    if (typeof query.location !== 'string') {
+      fields.location = 'location must be a single text value.';
+    } else {
+      const location = query.location.trim();
+      if (location.length > MAX_LOCATION_LENGTH) {
+        fields.location = `location must be at most ${MAX_LOCATION_LENGTH} characters.`;
+      } else if (location) {
+        filters.location = location;
+      }
+    }
+  }
+
+  return { filters, fields };
 }

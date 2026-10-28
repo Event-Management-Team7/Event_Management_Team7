@@ -11,26 +11,57 @@ Testing - Avinash Julakatti
 
 **Link to jira space:** https://vaishaliam313.atlassian.net/jira/software/projects/EMT/summary
 
-## Tech stack
-- **Backend:** C++17 REST API ([cpp-httplib](https://github.com/yhirose/cpp-httplib), [nlohmann/json](https://github.com/nlohmann/json)), SQLite3
-- **Security:** PBKDF2-HMAC-SHA256 password hashing (OpenSSL), bearer token sessions, parameterized SQL queries
-- **Frontend:** Responsive HTML5 / CSS3 / JavaScript web client and QR check-in portal served by the backend (`web/`)
-- **Tests:** GoogleTest unit and integration test suites, gcov/gcovr coverage, pytest + Playwright browser tests for the web client
-- **CI/CD:** GitHub Actions (build, test, coverage, cppcheck, CodeQL security scan, Docker build and GHCR publish)
+## Tech Stack
+- **Backend:** Node.js & Express REST API, SQLite3 (`better-sqlite3`)
+- **Frontend:** React.js (Vite) Single-Page Application (`frontend/`)
+- **Security:** Salted bcrypt password hashing, JWT bearer tokens, parameterized SQL queries
+- **Tests & Quality:** Node.js native test runner (`node:test`) with experimental coverage, ESLint 9+ flat configuration
+- **CI/CD:** GitHub Actions (Node.js unit tests with coverage, ESLint static analysis, React production build, Docker container build and GHCR publish)
 
-## Running the web client
+## Getting Started
+
+### Prerequisites
+- Node.js >= 20 (v22 recommended)
+- npm >= 10
+
+### Running the Application
+
+1. **Install dependencies:**
+   ```bash
+   npm --prefix backend install
+   npm --prefix frontend install
+   npm install
+   ```
+
+2. **Start Backend Server:**
+   ```bash
+   npm run start:backend
+   # Backend runs on http://localhost:8080
+   ```
+
+3. **Start Frontend (Vite Dev Server):**
+   ```bash
+   npm run dev:frontend
+   # Frontend runs on http://localhost:5173 (proxied to backend on 8080)
+   ```
+
+4. **Build Frontend for Production:**
+   ```bash
+   npm run build:frontend
+   ```
+
+## Running the Tests & Quality Checks
+
+### 1. Backend Unit, Service & API Tests (Node.js)
+Runs all 61 automated tests covering input validation, authentication, event management, registrations, waitlists, tickets, and SQLite database operations with full coverage reporting:
 ```bash
-cmake -S . -B build && cmake --build build -j
-EMRS_DB=emrs.db EMRS_PORT=8080 EMRS_WEB_DIR=web ./build/emrs_server
-# open http://localhost:8080
+npm test
 ```
 
-## Running the tests
+### 2. Static Analysis & Linting (ESLint)
+Runs ESLint across backend and frontend code:
 ```bash
-ctest --test-dir build --output-on-failure      # C++ unit and API tests
-pip install -r tests/frontend/requirements.txt  # one time
-playwright install chromium                     # one time
-pytest -v                                       # browser tests for web/
+npm run lint
 ```
 
 ## Documentation
@@ -39,7 +70,7 @@ All software engineering specifications and architecture models are located in t
 - [Software Architecture Document (SAD)](docs/EMRS_SAD_v1_1_UML_Aligned.pdf)
 - [System Test Plan](docs/EMRS_Test_Plan_v1_1.pdf)
 - [Sprint 1 Test Plan (EMT-20)](docs/Sprint_1_Test_Plan.md)
-- [Branch Protection & CI Quality Gates (EMT-19)](docs/BRANCH_PROTECTION.md)
+- [Branch Protection & CI Quality Gates (EMT-30)](docs/BRANCH_PROTECTION.md)
 - [UML Component Diagram](docs/EMRS_component_diagram_updated.png)
 
 ![EMRS UML Component Diagram](docs/EMRS_component_diagram_updated.png)
@@ -50,103 +81,76 @@ Event_Management_Team7/
 ├── .github/
 │   └── workflows/
 │       ├── cd.yml                  # Publish Docker container to GHCR on main branch merge
-│       ├── ci.yml                  # CI: build, unit tests, coverage, cppcheck, docker smoke test
+│       ├── ci.yml                  # CI: Node.js tests & coverage, ESLint, React build, Docker build
 │       └── codeql.yml              # CodeQL security static analysis
-├── docs/                           # Project requirements, architecture specs, test plan & diagrams
-│   ├── BRANCH_PROTECTION.md        # Branch protection rules & CI quality gate criteria
-│   ├── EMRS_SAD_v1_1_UML_Aligned.pdf
-│   ├── EMRS_Test_Plan_v1_1.pdf
-│   ├── EMRS_component_diagram_updated.png
-│   ├── Software Requirements Specification (SRS).docx
-│   └── Sprint_1_Test_Plan.md       # Sprint 1 test plan (EMT-11, EMT-12, EMT-14)
-├── src/                            # Modular C++17 backend source code
-│   ├── api/                        # REST API routing & request handlers
-│   │   ├── Routes.h
-│   │   └── Routes.cpp
-│   ├── auth/                       # Password hashing & cryptographic utilities
-│   │   ├── PasswordHasher.h
-│   │   └── PasswordHasher.cpp
-│   ├── db/                         # Database connection & schema management
-│   │   ├── Database.h
-│   │   ├── Database.cpp
-│   │   ├── Schema.h
-│   │   └── Schema.cpp
-│   ├── services/                   # Business logic layer
-│   │   ├── AuthService.h
-│   │   ├── AuthService.cpp
-│   │   ├── EventService.h
-│   │   ├── EventService.cpp
-│   │   ├── RegistrationService.h
-│   │   ├── RegistrationService.cpp
-│   │   ├── TicketService.h
-│   │   ├── TicketService.cpp
-│   │   ├── UserService.h
-│   │   └── UserService.cpp
-│   ├── util/                       # Input validation & sanitization
-│   │   ├── Validation.h
-│   │   └── Validation.cpp
-│   └── main.cpp                    # Application entry point & HTTP server
-├── tests/                          # Automated GoogleTest test suites
-│   ├── TestServer.h                # In-memory ephemeral test harness
-│   ├── test_api_event.cpp          # Event creation API & authorization test suite
-│   ├── test_api_login.cpp
-│   ├── test_api_register.cpp
-│   ├── test_auth_service.cpp
-│   ├── test_database.cpp
-│   ├── test_event_service.cpp
-│   ├── test_health.cpp
-│   ├── test_password_hasher.cpp
-│   ├── test_registration_service.cpp
-│   ├── test_ticket_service.cpp
-│   └── test_validation.cpp
-├── web/                            # Responsive presentation layer
-│   ├── app.js                      # Client routing, RSVP, and ticket scanner
-│   ├── index.html                  # Accessible UI (Attendee, Organizer, QR Check-in)
-│   └── style.css                   # Modern dark-mode interface styling
-├── .dockerignore
-├── .gitignore
-├── CMakeLists.txt
-├── Dockerfile
+├── backend/                        # Node.js + Express backend service
+│   ├── src/
+│   │   ├── auth/                   # Passwords and crypto (bcrypt, pbkdf2)
+│   │   ├── db/                     # SQLite connection, schema & migrations
+│   │   ├── middleware/             # JWT authentication middleware
+│   │   ├── routes/                 # Express API route handlers
+│   │   ├── services/               # Business logic (Auth, Events, Registrations, Tickets)
+│   │   ├── util/                   # Input validation and sanitization
+│   │   ├── app.js                  # Express app setup and route configuration
+│   │   └── server.js               # Application HTTP server entry point
+│   ├── test/                       # Node.js automated test suites (node:test)
+│   │   ├── api.test.js             # End-to-end REST API & session test suite
+│   │   ├── auth-service.test.js    # Auth service & password hashing tests
+│   │   ├── database.test.js        # SQLite schema & migration tests
+│   │   ├── event-service.test.js   # Event CRUD & access control tests
+│   │   ├── mailer.test.js          # Email notification tests
+│   │   ├── registration-service.test.js # Registration & waitlist tests
+│   │   ├── ticket-service.test.js  # Ticket & check-in tests
+│   │   └── validation.test.js      # Input validation test suite
+│   ├── package.json
+│   └── package-lock.json
+├── frontend/                       # React.js (Vite) Single-Page Application
+│   ├── src/
+│   │   ├── components/             # Reusable UI components (AuthPanel, EventCard, EventForm, etc.)
+│   │   ├── pages/                  # Per-tab views (EventsPage, CreateEventPage, CheckInPage, etc.)
+│   │   ├── hooks/                  # Custom React hooks (useEventActions)
+│   │   ├── App.jsx                 # Main application layout
+│   │   ├── api.js                  # API client fetch wrappers
+│   │   ├── main.jsx                # React root bootstrap
+│   │   └── styles.css              # Application CSS styling
+│   ├── package.json
+│   └── vite.config.js
+├── docs/                           # Project requirements, architecture specs & test plans
+├── Dockerfile                      # Multi-stage production Dockerfile (Node.js 22 + React)
+├── eslint.config.js                # Modern flat ESLint configuration
+├── package.json                    # Root workspace package.json
+├── package-lock.json               # Root lockfile
 └── README.md
 ```
 
-## Build and run
+## Docker
+Build and run the production container:
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j
-ctest --test-dir build --output-on-failure
-./build/emrs_server          # http://localhost:8080
+docker build -t emrs .
+docker run -p 8080:8080 emrs
 ```
+The container builds the React frontend, runs the Node.js Express server, and serves the frontend on port 8080. Health check endpoint: `GET /api/health`.
 
-Environment variables:
-- `EMRS_PORT` (default `8080`)
-- `EMRS_DB` (default `emrs.db`)
-- `EMRS_WEB_DIR` (default `web`)
+### Email configuration (EMT-52)
 
-### Node.js backend email configuration
-
-The Node.js backend uses the in-memory mail transport by default. It is intended for tests and local development; messages are kept in process memory and are not delivered.
-
-Set `MAIL_TRANSPORT=smtp` to deliver email through Nodemailer. SMTP mode requires valid values for all of the following:
+The backend defaults to `MAIL_TRANSPORT=memory`, which keeps messages in process memory and is intended for tests and local development; it does not deliver email. Set `MAIL_TRANSPORT=smtp` to enable delivery through Nodemailer. SMTP mode requires valid configuration:
 
 - `SMTP_HOST` — SMTP server host
 - `SMTP_PORT` — SMTP server port (for example, `587` or `465`)
 - `SMTP_USER` — SMTP authentication username
 - `SMTP_PASS` — SMTP authentication password
 - `MAIL_FROM` — sender address/name
-- `APP_BASE_URL` — required public base URL used to create email verification links (for example, `https://events.example.com`, or `http://localhost:8080` for local development)
+- `APP_BASE_URL` — public application base URL used to construct email verification links (for example, `https://events.example.com`, or `http://localhost:8080` for local development)
 
-Keep SMTP credentials in the environment rather than committing them to source control. Configure the backend with `MAIL_TRANSPORT=memory` for tests/local development or `MAIL_TRANSPORT=smtp` and valid SMTP settings for delivery.
+Keep SMTP credentials in the environment rather than committing them to source control. Configure all SMTP settings before selecting `MAIL_TRANSPORT=smtp`.
 
-Docker:
-```bash
-docker build -t emrs . && docker run -p 8080:8080 emrs
-```
+On registration, EMRS sends a plain-text email asking the user to verify their email address. The link uses `APP_BASE_URL`; verification tokens are single-use and expire after 24 hours. Login does not require email verification. A successful event registration sends a plain-text confirmation with the event title, date/time, and ticket code. Waitlisted registrations do not receive a confirmed-registration email.
+
+EMT-52 tests cover SMTP configuration and mocked delivery, verification email content and token handling, registration confirmation content, waitlist behavior, and email-failure isolation. Waitlist promotion and event cancellation emails are deferred to EMT-47; password-reset emails are deferred to EMT-13.
 
 ## Workflow
-1. Developer works on one feature branch per Jira story (e.g. `EMRS-1-user-registration`), one commit per story.
-2. Pull request into `test`; CI must be green.
-3. Tester verifies on `test`, then merges `test` into `main`.
-4. Merge to `main` publishes the Docker image (CD).
-
-Commit messages start with the Jira key, e.g. `EMRS-1: Add user registration and validation`.
+1. Developer creates a feature branch per Jira story (e.g. `EMT-30-ci-cd-node-react`), with concise commits prefixed with the story key.
+2. Pull requests target `main` directly.
+3. CI status checks (`Build, unit tests, coverage`, `Static analysis (JavaScript syntax & lint)`, `Docker image builds`) must pass green before merge.
+4. QA / Tester (Avinash Julakatti) and Development Lead (Dhanraj Rathod) review and approve the PR.
+5. Merging to `main` triggers automated container build and publication to GHCR via CD.

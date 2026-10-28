@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import { createAuthentication } from './middleware/authentication.js';
 import { createAuthRouter } from './routes/auth.js';
@@ -10,7 +12,7 @@ import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
 import { createMailer } from './services/mailer.js';
 
-export function createApp({ db, clock, passwordCost, jwtSecret, mailer, appBaseUrl } = {}) {
+export function createApp({ db, clock, passwordCost, jwtSecret, mailer, appBaseUrl, webDir } = {}) {
   if (!db) throw new Error('A database instance is required');
 
   const resolvedMailer = mailer ?? createMailer();
@@ -42,6 +44,17 @@ export function createApp({ db, clock, passwordCost, jwtSecret, mailer, appBaseU
   app.use('/api/events', createEventsRouter({ authentication, eventService, registrationService, mailer: resolvedMailer }));
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
+
+  let staticDir = webDir ?? process.env.EMRS_WEB_DIR;
+  if (!staticDir) {
+    const defaultFrontendDist = path.resolve('frontend/dist');
+    if (fs.existsSync(defaultFrontendDist)) {
+      staticDir = defaultFrontendDist;
+    }
+  }
+  if (staticDir) {
+    app.use(express.static(staticDir));
+  }
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use((error, _req, res, _next) => {

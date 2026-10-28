@@ -52,7 +52,9 @@ export class EventService {
     this.clock = clock;
   }
 
-  list({ category = '', search = '' } = {}) {
+  // `from` and `to` are inclusive YYYY-MM-DD dates compared with the event's start date;
+  // `location` is a case-insensitive substring match on the venue. All filters combine with AND.
+  list({ category = '', search = '', from = '', to = '', location = '' } = {}) {
     const conditions = ["e.status IN ('active', 'Upcoming')"];
     const params = [];
     if (category) {
@@ -63,6 +65,18 @@ export class EventService {
       conditions.push('(e.title LIKE ? OR e.description LIKE ? OR e.venue LIKE ?)');
       const pattern = `%${search}%`;
       params.push(pattern, pattern, pattern);
+    }
+    if (from) {
+      conditions.push('e.event_date >= ?');
+      params.push(from);
+    }
+    if (to) {
+      conditions.push('e.event_date <= ?');
+      params.push(to);
+    }
+    if (location) {
+      conditions.push("e.venue LIKE ? ESCAPE '\\'");
+      params.push(`%${location.replace(/[\\%_]/g, '\\$&')}%`);
     }
     const rows = this.db.all(
       `${EVENT_SELECT} WHERE ${conditions.join(' AND ')} GROUP BY e.id ORDER BY e.event_date ASC`,
