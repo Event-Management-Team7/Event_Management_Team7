@@ -95,6 +95,8 @@ export function createEventsRouter({
         res.status(404).json({ error: 'Event not found' });
       } else if (result.result === 'event-cancelled') {
         res.status(400).json({ error: 'Event has been cancelled' });
+      } else if (result.result === 'event-started') {
+        res.status(400).json({ error: 'Event has already started' });
       } else if (result.result === 'already-registered') {
         res.status(409).json({ error: 'You are already registered for this event' });
       } else if (result.result === 'confirmed') {
