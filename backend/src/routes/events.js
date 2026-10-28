@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
+import { createRateLimitOptions } from '../middleware/rateLimiting.js';
 import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, parsePositiveId, validateEvent, validateEventFilters } from '../util/validation.js';
 
@@ -23,7 +25,7 @@ export function createEventsRouter({
   eventService,
   registrationService,
   mailer,
-  registrationRateLimiter
+  registrationRateLimitOptions
 }) {
   const router = Router();
 
@@ -83,7 +85,10 @@ export function createEventsRouter({
     }
   });
 
-  router.post('/:id/register', authentication.authenticate, registrationRateLimiter, async (req, res, next) => {
+  router.post('/:id/register', authentication.authenticate, rateLimit(createRateLimitOptions(
+    100,
+    registrationRateLimitOptions
+  )), async (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });

@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
+import { createRateLimitOptions } from '../middleware/rateLimiting.js';
 import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, validateRegistration } from '../util/validation.js';
 
@@ -7,14 +9,15 @@ export function createAuthRouter({
   authentication,
   mailer,
   appBaseUrl,
-  protectedRouteRateLimiter,
-  registrationRateLimiter,
-  verificationRateLimiter,
-  loginRateLimiter
+  protectedRouteRateLimitOptions,
+  publicAuthRateLimitOptions = {}
 }) {
   const router = Router();
 
-  router.post('/register', registrationRateLimiter, async (req, res, next) => {
+  router.post('/register', rateLimit(createRateLimitOptions(
+    5,
+    publicAuthRateLimitOptions.registration
+  )), async (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -69,7 +72,10 @@ export function createAuthRouter({
     }
   });
 
-  router.get('/verify-email', verificationRateLimiter, (req, res, next) => {
+  router.get('/verify-email', rateLimit(createRateLimitOptions(
+    30,
+    publicAuthRateLimitOptions.verification
+  )), (req, res, next) => {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     try {
       if (!authService.verifyEmail(token)) {
@@ -82,7 +88,10 @@ export function createAuthRouter({
     }
   });
 
-  router.post('/login', loginRateLimiter, (req, res, next) => {
+  router.post('/login', rateLimit(createRateLimitOptions(
+    10,
+    publicAuthRateLimitOptions.login
+  )), (req, res, next) => {
     if (!isObjectBody(req.body)) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -131,7 +140,10 @@ export function createAuthRouter({
     }
   });
 
-  router.get('/me', authentication.authenticate, protectedRouteRateLimiter, (req, res) => {
+  router.get('/me', authentication.authenticate, rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), (req, res) => {
     const { id, name, email, phone, role } = req.user;
     res.status(200).json({ user: { id, name, email, phone, role } });
   });

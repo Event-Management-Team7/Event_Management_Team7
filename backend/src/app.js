@@ -2,10 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { createAuthentication } from './middleware/authentication.js';
-import {
-  createProtectedRouteRateLimiter,
-  createPublicAuthRateLimiter
-} from './middleware/rateLimiting.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createEventsRouter } from './routes/events.js';
 import { createRegistrationsRouter } from './routes/registrations.js';
@@ -35,20 +31,6 @@ export function createApp({
   const registrationService = new RegistrationService(db, clock);
   const ticketService = new TicketService(db, clock);
   const authentication = createAuthentication(authService);
-  const authRouteRateLimiter = createProtectedRouteRateLimiter(protectedRouteRateLimitOptions);
-  const eventRegistrationRateLimiter = createProtectedRouteRateLimiter(protectedRouteRateLimitOptions);
-  const registrationRateLimiter = createPublicAuthRateLimiter({
-    limit: 5,
-    ...publicAuthRateLimitOptions.registration
-  });
-  const verificationRateLimiter = createPublicAuthRateLimiter({
-    limit: 30,
-    ...publicAuthRateLimitOptions.verification
-  });
-  const loginRateLimiter = createPublicAuthRateLimiter({
-    limit: 10,
-    ...publicAuthRateLimitOptions.login
-  });
 
   const app = express();
   app.disable('x-powered-by');
@@ -68,17 +50,15 @@ export function createApp({
     authentication,
     mailer: resolvedMailer,
     appBaseUrl: appBaseUrl ?? process.env.APP_BASE_URL,
-    protectedRouteRateLimiter: authRouteRateLimiter,
-    registrationRateLimiter,
-    verificationRateLimiter,
-    loginRateLimiter
+    protectedRouteRateLimitOptions,
+    publicAuthRateLimitOptions
   }));
   app.use('/api/events', createEventsRouter({
     authentication,
     eventService,
     registrationService,
     mailer: resolvedMailer,
-    registrationRateLimiter: eventRegistrationRateLimiter
+    registrationRateLimitOptions: protectedRouteRateLimitOptions
   }));
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
