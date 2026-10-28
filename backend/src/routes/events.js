@@ -18,7 +18,13 @@ function organizerOnly(req, res, next) {
   next();
 }
 
-export function createEventsRouter({ authentication, eventService, registrationService, mailer }) {
+export function createEventsRouter({
+  authentication,
+  eventService,
+  registrationService,
+  mailer,
+  registrationRateLimiter
+}) {
   const router = Router();
 
   router.get('/', (req, res) => {
@@ -77,7 +83,7 @@ export function createEventsRouter({ authentication, eventService, registrationS
     }
   });
 
-  router.post('/:id/register', authentication.authenticate, async (req, res, next) => {
+  router.post('/:id/register', authentication.authenticate, registrationRateLimiter, async (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });

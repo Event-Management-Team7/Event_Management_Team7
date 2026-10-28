@@ -2,7 +2,13 @@ import { Router } from 'express';
 import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, validateRegistration } from '../util/validation.js';
 
-export function createAuthRouter({ authService, authentication, mailer, appBaseUrl }) {
+export function createAuthRouter({
+  authService,
+  authentication,
+  mailer,
+  appBaseUrl,
+  protectedRouteRateLimiter
+}) {
   const router = Router();
 
   router.post('/register', async (req, res, next) => {
@@ -122,7 +128,7 @@ export function createAuthRouter({ authService, authentication, mailer, appBaseU
     }
   });
 
-  router.get('/me', authentication.authenticate, (req, res) => {
+  router.get('/me', authentication.authenticate, protectedRouteRateLimiter, (req, res) => {
     const { id, name, email, phone, role } = req.user;
     res.status(200).json({ user: { id, name, email, phone, role } });
   });

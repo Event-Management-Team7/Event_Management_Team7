@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { createAuthentication } from './middleware/authentication.js';
+import { createProtectedRouteRateLimiter } from './middleware/rateLimiting.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createEventsRouter } from './routes/events.js';
 import { createRegistrationsRouter } from './routes/registrations.js';
@@ -12,7 +13,16 @@ import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
 import { createMailer } from './services/mailer.js';
 
-export function createApp({ db, clock, passwordCost, jwtSecret, mailer, appBaseUrl, webDir } = {}) {
+export function createApp({
+  db,
+  clock,
+  passwordCost,
+  jwtSecret,
+  mailer,
+  appBaseUrl,
+  webDir,
+  protectedRouteRateLimitOptions
+} = {}) {
   if (!db) throw new Error('A database instance is required');
 
   const resolvedMailer = mailer ?? createMailer();
@@ -21,6 +31,8 @@ export function createApp({ db, clock, passwordCost, jwtSecret, mailer, appBaseU
   const registrationService = new RegistrationService(db, clock);
   const ticketService = new TicketService(db, clock);
   const authentication = createAuthentication(authService);
+  const authRouteRateLimiter = createProtectedRouteRateLimiter(protectedRouteRateLimitOptions);
+  const eventRegistrationRateLimiter = createProtectedRouteRateLimiter(protectedRouteRateLimitOptions);
 
   const app = express();
   app.disable('x-powered-by');
@@ -39,9 +51,16 @@ export function createApp({ db, clock, passwordCost, jwtSecret, mailer, appBaseU
     authService,
     authentication,
     mailer: resolvedMailer,
-    appBaseUrl: appBaseUrl ?? process.env.APP_BASE_URL
+    appBaseUrl: appBaseUrl ?? process.env.APP_BASE_URL,
+    protectedRouteRateLimiter: authRouteRateLimiter
   }));
-  app.use('/api/events', createEventsRouter({ authentication, eventService, registrationService, mailer: resolvedMailer }));
+  app.use('/api/events', createEventsRouter({
+    authentication,
+    eventService,
+    registrationService,
+    mailer: resolvedMailer,
+    registrationRateLimiter: eventRegistrationRateLimiter
+  }));
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));
 

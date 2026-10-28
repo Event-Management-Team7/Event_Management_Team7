@@ -21,7 +21,11 @@ const VALID_EVENT = {
   ticketTypes: [{ name: 'General Admission', price: 15.5 }]
 };
 
-function setup({ mailer, appBaseUrl = 'https://emrs.example.test' } = {}) {
+function setup({
+  mailer,
+  appBaseUrl = 'https://emrs.example.test',
+  protectedRouteRateLimitOptions
+} = {}) {
   const db = new Database(':memory:');
   const app = createApp({
     db,
@@ -29,7 +33,8 @@ function setup({ mailer, appBaseUrl = 'https://emrs.example.test' } = {}) {
     passwordCost: 4,
     jwtSecret: JWT_SECRET,
     mailer,
-    appBaseUrl
+    appBaseUrl,
+    protectedRouteRateLimitOptions
   });
   return { app, db };
 }
@@ -89,6 +94,35 @@ test('health routes return the existing response shape', async (t) => {
       version: '1.0.0'
     });
   }
+});
+
+test('authenticated profile and event registration routes enforce independent rate limits', async (t) => {
+  const { app, db } = setup({
+    protectedRouteRateLimitOptions: { windowMs: 60_000, limit: 1 }
+  });
+  t.after(() => db.close());
+
+  const attendee = await createUser(app, { email: 'rate-limit-attendee@example.test' });
+  const profile = () => request(app)
+    .get('/api/auth/me')
+    .set('Authorization', `Bearer ${attendee.token}`);
+  assert.equal((await profile()).status, 200);
+  const limitedProfile = await profile();
+  assert.equal(limitedProfile.status, 429);
+  assert.deepEqual(limitedProfile.body, { error: 'Too many requests, please try again later.' });
+
+  const organizer = await createUser(app, { email: 'rate-limit-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const event = await createEvent(app, organizer.token);
+  const register = () => request(app)
+    .post(`/api/events/${event.body.eventId}/register`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+  const registration = await register();
+  assert.equal(registration.status, 200);
+  assert.equal(registration.body.status, 'confirmed');
+  const limitedRegistration = await register();
+  assert.equal(limitedRegistration.status, 429);
+  assert.deepEqual(limitedRegistration.body, { error: 'Too many requests, please try again later.' });
 });
 
 const REGISTRATION = {
