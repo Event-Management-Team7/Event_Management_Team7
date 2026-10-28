@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { createAuthentication } from './middleware/authentication.js';
-import { createProtectedRouteRateLimiter } from './middleware/rateLimiting.js';
+import {
+  createProtectedRouteRateLimiter,
+  createPublicAuthRateLimiter
+} from './middleware/rateLimiting.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createEventsRouter } from './routes/events.js';
 import { createRegistrationsRouter } from './routes/registrations.js';
@@ -21,7 +24,8 @@ export function createApp({
   mailer,
   appBaseUrl,
   webDir,
-  protectedRouteRateLimitOptions
+  protectedRouteRateLimitOptions,
+  publicAuthRateLimitOptions = {}
 } = {}) {
   if (!db) throw new Error('A database instance is required');
 
@@ -33,6 +37,18 @@ export function createApp({
   const authentication = createAuthentication(authService);
   const authRouteRateLimiter = createProtectedRouteRateLimiter(protectedRouteRateLimitOptions);
   const eventRegistrationRateLimiter = createProtectedRouteRateLimiter(protectedRouteRateLimitOptions);
+  const registrationRateLimiter = createPublicAuthRateLimiter({
+    limit: 5,
+    ...publicAuthRateLimitOptions.registration
+  });
+  const verificationRateLimiter = createPublicAuthRateLimiter({
+    limit: 30,
+    ...publicAuthRateLimitOptions.verification
+  });
+  const loginRateLimiter = createPublicAuthRateLimiter({
+    limit: 10,
+    ...publicAuthRateLimitOptions.login
+  });
 
   const app = express();
   app.disable('x-powered-by');
@@ -52,7 +68,10 @@ export function createApp({
     authentication,
     mailer: resolvedMailer,
     appBaseUrl: appBaseUrl ?? process.env.APP_BASE_URL,
-    protectedRouteRateLimiter: authRouteRateLimiter
+    protectedRouteRateLimiter: authRouteRateLimiter,
+    registrationRateLimiter,
+    verificationRateLimiter,
+    loginRateLimiter
   }));
   app.use('/api/events', createEventsRouter({
     authentication,

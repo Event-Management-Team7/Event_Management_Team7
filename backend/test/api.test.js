@@ -24,7 +24,8 @@ const VALID_EVENT = {
 function setup({
   mailer,
   appBaseUrl = 'https://emrs.example.test',
-  protectedRouteRateLimitOptions
+  protectedRouteRateLimitOptions,
+  publicAuthRateLimitOptions
 } = {}) {
   const db = new Database(':memory:');
   const app = createApp({
@@ -34,7 +35,8 @@ function setup({
     jwtSecret: JWT_SECRET,
     mailer,
     appBaseUrl,
-    protectedRouteRateLimitOptions
+    protectedRouteRateLimitOptions,
+    publicAuthRateLimitOptions
   });
   return { app, db };
 }
@@ -123,6 +125,45 @@ test('authenticated profile and event registration routes enforce independent ra
   const limitedRegistration = await register();
   assert.equal(limitedRegistration.status, 429);
   assert.deepEqual(limitedRegistration.body, { error: 'Too many requests, please try again later.' });
+});
+
+test('public registration, verification, and login routes use separate rate limits', async (t) => {
+  const messages = [];
+  const { app, db } = setup({
+    mailer: { async sendMail(message) { messages.push(message); } },
+    publicAuthRateLimitOptions: {
+      registration: { windowMs: 60_000, limit: 1 },
+      verification: { windowMs: 60_000, limit: 1 },
+      login: { windowMs: 60_000, limit: 1 }
+    }
+  });
+  t.after(() => db.close());
+
+  const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
+  assert.equal(registration.status, 201);
+  const token = new URL(messages[0].text.match(/Verify your email address: (.+)/)[1])
+    .searchParams.get('token');
+
+  const verified = await request(app).get('/api/auth/verify-email').query({ token });
+  assert.equal(verified.status, 200);
+  const limitedVerification = await request(app).get('/api/auth/verify-email').query({ token });
+  assert.equal(limitedVerification.status, 429);
+
+  const login = () => request(app).post('/api/auth/login').send({
+    email: REGISTRATION.email,
+    password: VALID_PASSWORD
+  });
+  assert.equal((await login()).status, 200);
+  const limitedLogin = await login();
+  assert.equal(limitedLogin.status, 429);
+
+  const limitedRegistration = await request(app).post('/api/auth/register').send({
+    ...REGISTRATION,
+    email: 'another@example.test'
+  });
+  assert.equal(limitedRegistration.status, 429);
+  assert.deepEqual(limitedRegistration.body, { error: 'Too many requests, please try again later.' });
+  assert.ok(Object.keys(limitedRegistration.headers).some((header) => header.startsWith('ratelimit')));
 });
 
 const REGISTRATION = {

@@ -7,11 +7,14 @@ export function createAuthRouter({
   authentication,
   mailer,
   appBaseUrl,
-  protectedRouteRateLimiter
+  protectedRouteRateLimiter,
+  registrationRateLimiter,
+  verificationRateLimiter,
+  loginRateLimiter
 }) {
   const router = Router();
 
-  router.post('/register', async (req, res, next) => {
+  router.post('/register', registrationRateLimiter, async (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -66,7 +69,7 @@ export function createAuthRouter({
     }
   });
 
-  router.get('/verify-email', (req, res, next) => {
+  router.get('/verify-email', verificationRateLimiter, (req, res, next) => {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     try {
       if (!authService.verifyEmail(token)) {
@@ -79,7 +82,7 @@ export function createAuthRouter({
     }
   });
 
-  router.post('/login', (req, res, next) => {
+  router.post('/login', loginRateLimiter, (req, res, next) => {
     if (!isObjectBody(req.body)) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
