@@ -15,8 +15,17 @@ export function createRegistrationsRouter({ authentication, registrationService 
       return;
     }
     try {
-      if (!registrationService.cancel(registrationId, req.user.id)) {
+      const result = registrationService.cancel(registrationId, req.user.id);
+      if (result === false || result === 'not-found') {
         res.status(404).json({ error: 'Registration not found' });
+        return;
+      }
+      if (result === 'forbidden') {
+        res.status(403).json({ error: 'You can only cancel your own registration' });
+        return;
+      }
+      if (result === 'event-started') {
+        res.status(400).json({ error: 'Cannot cancel registration for an event that has already started' });
         return;
       }
       res.status(200).json({ message: 'Registration cancelled successfully' });

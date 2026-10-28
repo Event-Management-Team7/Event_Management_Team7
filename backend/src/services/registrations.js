@@ -24,9 +24,20 @@ export class RegistrationService {
 
   register(eventId, userId) {
     return this.db.transaction(() => {
-      const event = this.db.get('SELECT capacity, status FROM events WHERE id = ?', [eventId]);
+      const event = this.db.get(
+        'SELECT capacity, status, start_datetime, event_date, start_time FROM events WHERE id = ?',
+        [eventId]
+      );
       if (!event) return { result: 'not-found' };
       if (event.status === 'cancelled') return { result: 'event-cancelled' };
+
+      const startIso = event.start_datetime || (
+        event.start_time ? `${event.event_date}T${event.start_time}` : event.event_date
+      );
+      const startTimeSec = Math.floor(new Date(startIso).getTime() / 1000);
+      if (startTimeSec && startTimeSec <= this.clock()) {
+        return { result: 'event-started' };
+      }
 
       const existing = this.db.get(
         'SELECT id, status FROM registrations WHERE event_id = ? AND user_id = ?',
@@ -70,13 +81,24 @@ export class RegistrationService {
   cancel(registrationId, userId) {
     return this.db.transaction(() => {
       const registration = this.db.get(
-        'SELECT event_id, status FROM registrations WHERE id = ? AND user_id = ?',
+        `SELECT r.id, r.event_id, r.user_id, r.status,
+                e.start_datetime, e.event_date, e.start_time
+         FROM registrations r
+         JOIN events e ON e.id = r.event_id
+         WHERE r.id = ? AND r.user_id = ?`,
         [registrationId, userId]
       );
       if (!registration || registration.status === 'cancelled') return false;
 
+      const startIso = registration.start_datetime || (
+        registration.start_time ? `${registration.event_date}T${registration.start_time}` : registration.event_date
+      );
+      const startTimeSec = Math.floor(new Date(startIso).getTime() / 1000);
+      if (startTimeSec && startTimeSec <= this.clock()) {
+        return 'event-started';
+      }
+
       this.db.run("UPDATE registrations SET status = 'cancelled' WHERE id = ?", [registrationId]);
-      this.db.run('DELETE FROM tickets WHERE registration_id = ?', [registrationId]);
       if (registration.status === 'confirmed') {
         const next = this.db.get(
           `SELECT id, user_id FROM registrations

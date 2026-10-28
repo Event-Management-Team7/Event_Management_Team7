@@ -40,6 +40,14 @@ export function createTicketsRouter({ authService, authentication, ticketService
         res.status(404).json({ error: 'Invalid ticket code' });
         return;
       }
+      if (user.role !== 'Admin' && ticket.organizer_id !== user.id) {
+        res.status(403).json({ error: 'Only the event organizer can check in attendees for this event.' });
+        return;
+      }
+      if (ticket.registration_status === 'cancelled' || ticket.event_status === 'cancelled') {
+        res.status(400).json({ error: 'Ticket has been cancelled' });
+        return;
+      }
       if (ticket.checked_in) {
         res.status(409).json({ error: 'Ticket has already been checked in' });
         return;
@@ -67,6 +75,14 @@ export function createTicketsRouter({ authService, authentication, ticketService
     const ticket = ticketService.getByCode(req.params.code);
     if (!ticket) {
       res.status(404).json({ error: 'Invalid ticket code' });
+      return;
+    }
+    if (req.user.role !== 'Admin' && ticket.organizer_id !== req.user.id) {
+      res.status(403).json({ error: 'Only the event organizer can validate tickets for this event.' });
+      return;
+    }
+    if (ticket.registration_status === 'cancelled' || ticket.event_status === 'cancelled') {
+      res.status(400).json({ error: 'Ticket has been cancelled' });
       return;
     }
     res.status(200).json({
