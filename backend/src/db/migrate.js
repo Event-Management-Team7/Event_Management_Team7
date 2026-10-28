@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const schemaPath = fileURLToPath(new URL('./schema.sql', import.meta.url));
 const schemaSql = readFileSync(schemaPath, 'utf8');
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 const EVENT_COLUMNS = new Map([
   ['start_time', "TEXT NOT NULL DEFAULT ''"],
   ['venue_type', "TEXT NOT NULL DEFAULT 'physical'"],

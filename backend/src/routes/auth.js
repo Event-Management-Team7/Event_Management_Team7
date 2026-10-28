@@ -1,10 +1,11 @@
 import { Router } from 'express';
+import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, validateRegistration } from '../util/validation.js';
 
-export function createAuthRouter({ authService, authentication }) {
+export function createAuthRouter({ authService, authentication, mailer, appBaseUrl }) {
   const router = Router();
 
-  router.post('/register', (req, res, next) => {
+  router.post('/register', async (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -31,7 +32,42 @@ export function createAuthRouter({ authService, authentication }) {
         res.status(409).json({ error: 'Email already registered' });
         return;
       }
+      const token = authService.createEmailVerificationToken(user.id);
+      if (!appBaseUrl) {
+        console.error('Email delivery failed');
+      } else {
+        try {
+          const verificationUrl = new URL('/api/auth/verify-email', appBaseUrl);
+          verificationUrl.searchParams.set('token', token);
+          await sendMailSafely(mailer, {
+            to: user.email,
+            subject: 'Verify your EMRS email address',
+            text: [
+              'Please verify your email address for Event Management and Registration System (EMRS).',
+              '',
+              `Verify your email address: ${verificationUrl.toString()}`,
+              '',
+              'If you did not create this account, you can ignore this message.'
+            ].join('\n')
+          });
+        } catch {
+          console.error('Email delivery failed');
+        }
+      }
       res.status(201).json({ message: 'Registration successful', user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/verify-email', (req, res, next) => {
+    const token = typeof req.query.token === 'string' ? req.query.token : '';
+    try {
+      if (!authService.verifyEmail(token)) {
+        res.status(400).json({ error: 'Invalid or expired email verification token' });
+        return;
+      }
+      res.status(200).json({ message: 'Email verified successfully' });
     } catch (error) {
       next(error);
     }

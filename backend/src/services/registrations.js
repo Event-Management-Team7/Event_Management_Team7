@@ -24,7 +24,11 @@ export class RegistrationService {
 
   register(eventId, userId) {
     return this.db.transaction(() => {
-      const event = this.db.get('SELECT capacity, status FROM events WHERE id = ?', [eventId]);
+      const event = this.db.get(
+        `SELECT capacity, status, title, event_date, start_time, start_datetime
+         FROM events WHERE id = ?`,
+        [eventId]
+      );
       if (!event) return { result: 'not-found' };
       if (event.status === 'cancelled') return { result: 'event-cancelled' };
 
@@ -57,10 +61,16 @@ export class RegistrationService {
       }
 
       if (status === 'confirmed') {
+        const attendee = this.db.get('SELECT email FROM users WHERE id = ?', [userId]);
         return {
           result: status,
           registrationId,
-          ticketCode: issueTicket(this.db, registrationId, eventId, userId)
+          ticketCode: issueTicket(this.db, registrationId, eventId, userId),
+          email: attendee.email,
+          eventTitle: event.title,
+          eventDateTime: event.start_datetime || (
+            event.start_time ? `${event.event_date}T${event.start_time}` : event.event_date
+          )
         };
       }
       return { result: status, registrationId };

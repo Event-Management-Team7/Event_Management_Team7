@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { DEFAULT_COST, hashPassword, verifyPassword } from '../auth/passwords.js';
 
@@ -7,6 +7,7 @@ const TOKEN_TTL_SECONDS = 60 * 60;
 const JWT_ALGORITHM = 'HS256';
 const MAX_FAILURES = 5;
 const LOCK_SECONDS = 5 * 60;
+const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
 const DUMMY_HASH = hashPassword('dummy-pass-never-matches-anything');
 
 function publicUser(row) {
@@ -70,6 +71,36 @@ export class AuthService {
       throw new TypeError('Public registration only allows the Attendee or Organizer role');
     }
     return createUser(this.db, this.clock, this.cost, { ...input, role });
+  }
+
+  createEmailVerificationToken(userId) {
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = this.clock() + EMAIL_VERIFICATION_TTL_SECONDS;
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM email_verification_tokens WHERE user_id = ?', [userId]);
+      this.db.run(
+        'INSERT INTO email_verification_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)',
+        [tokenHash, userId, expiresAt]
+      );
+    });
+    return token;
+  }
+
+  verifyEmail(token) {
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return false;
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    return this.db.transaction(() => {
+      const record = this.db.get(
+        'SELECT user_id, expires_at FROM email_verification_tokens WHERE token_hash = ?',
+        [tokenHash]
+      );
+      if (!record) return false;
+      this.db.run('DELETE FROM email_verification_tokens WHERE token_hash = ?', [tokenHash]);
+      if (record.expires_at <= this.clock()) return false;
+      this.db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [record.user_id]);
+      return true;
+    });
   }
 
   // Admin accounts are never self-registered (SRS EMRS-F-001); seed scripts or an existing Admin use this.

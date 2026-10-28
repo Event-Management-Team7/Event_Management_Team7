@@ -123,6 +123,21 @@ Environment variables:
 - `EMRS_DB` (default `emrs.db`)
 - `EMRS_WEB_DIR` (default `web`)
 
+### Node.js backend email configuration
+
+The Node.js backend uses the in-memory mail transport by default. It is intended for tests and local development; messages are kept in process memory and are not delivered.
+
+Set `MAIL_TRANSPORT=smtp` to deliver email through Nodemailer. SMTP mode requires valid values for all of the following:
+
+- `SMTP_HOST` — SMTP server host
+- `SMTP_PORT` — SMTP server port (for example, `587` or `465`)
+- `SMTP_USER` — SMTP authentication username
+- `SMTP_PASS` — SMTP authentication password
+- `MAIL_FROM` — sender address/name
+- `APP_BASE_URL` — required public base URL used to create email verification links (for example, `https://events.example.com`, or `http://localhost:8080` for local development)
+
+Keep SMTP credentials in the environment rather than committing them to source control. Configure the backend with `MAIL_TRANSPORT=memory` for tests/local development or `MAIL_TRANSPORT=smtp` and valid SMTP settings for delivery.
+
 Docker:
 ```bash
 docker build -t emrs . && docker run -p 8080:8080 emrs

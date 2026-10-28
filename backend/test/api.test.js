@@ -21,17 +21,31 @@ const VALID_EVENT = {
   ticketTypes: [{ name: 'General Admission', price: 15.5 }]
 };
 
-function setup() {
+function setup({ mailer, appBaseUrl = 'https://emrs.example.test' } = {}) {
   const db = new Database(':memory:');
-  const app = createApp({ db, clock: () => FIXED_NOW, passwordCost: 4, jwtSecret: JWT_SECRET });
+  const app = createApp({
+    db,
+    clock: () => FIXED_NOW,
+    passwordCost: 4,
+    jwtSecret: JWT_SECRET,
+    mailer,
+    appBaseUrl
+  });
   return { app, db };
 }
 
 // Like setup(), but the test can move time forward to exercise token expiry.
-function setupWithClock() {
+function setupWithClock({ mailer, appBaseUrl = 'https://emrs.example.test' } = {}) {
   const db = new Database(':memory:');
   const time = { now: FIXED_NOW };
-  const app = createApp({ db, clock: () => time.now, passwordCost: 4, jwtSecret: JWT_SECRET });
+  const app = createApp({
+    db,
+    clock: () => time.now,
+    passwordCost: 4,
+    jwtSecret: JWT_SECRET,
+    mailer,
+    appBaseUrl
+  });
   return { app, db, time };
 }
 
@@ -174,16 +188,62 @@ test('AC7: the stored password is a salted bcrypt hash, never the plaintext', as
   assert.notEqual(first.password_hash, second.password_hash);
 });
 
-test('AC8: verification is deferred; the account is usable immediately with email_verified = 0', async (t) => {
-  const { app, db } = setup();
+test('registration sends a verification link while preserving immediate login', async (t) => {
+  const messages = [];
+  const { app, db } = setup({
+    mailer: { async sendMail(message) { messages.push(message); } },
+    appBaseUrl: 'https://events.example.test'
+  });
   t.after(() => db.close());
   const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
   assert.equal(registration.status, 201);
   assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].to, REGISTRATION.email);
+  assert.match(messages[0].text, /verify your email address/i);
+  assert.match(messages[0].text, /Event Management and Registration System \(EMRS\)/);
+  const link = messages[0].text.match(/Verify your email address: (.+)/)[1];
+  const verificationUrl = new URL(link);
+  assert.equal(verificationUrl.origin, 'https://events.example.test');
+  assert.equal(verificationUrl.pathname, '/api/auth/verify-email');
+  const token = verificationUrl.searchParams.get('token');
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  const storedToken = db.get('SELECT token_hash FROM email_verification_tokens').token_hash;
+  assert.notEqual(storedToken, token);
+
   const login = await request(app)
     .post('/api/auth/login')
     .send({ email: REGISTRATION.email, password: VALID_PASSWORD });
   assert.equal(login.status, 200);
+
+  const verified = await request(app).get('/api/auth/verify-email').query({ token });
+  assert.equal(verified.status, 200);
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 1);
+  const reused = await request(app).get('/api/auth/verify-email').query({ token });
+  assert.equal(reused.status, 400);
+});
+
+test('invalid and expired verification tokens are rejected without verifying the user', async (t) => {
+  const messages = [];
+  const { app, db, time } = setupWithClock({
+    mailer: { async sendMail(message) { messages.push(message); } }
+  });
+  t.after(() => db.close());
+  const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
+  assert.equal(registration.status, 201);
+
+  const invalid = await request(app).get('/api/auth/verify-email')
+    .query({ token: 'a'.repeat(43) });
+  assert.equal(invalid.status, 400);
+
+  const expiredToken = new URL(messages[0].text.match(/Verify your email address: (.+)/)[1])
+    .searchParams.get('token');
+  time.now += 24 * 60 * 60;
+  const expired = await request(app).get('/api/auth/verify-email')
+    .query({ token: expiredToken });
+  assert.equal(expired.status, 400);
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM email_verification_tokens').count, 0);
 });
 
 test('a role with surrounding whitespace is accepted and normalised, not a server error', async (t) => {
@@ -704,6 +764,72 @@ test('registration confirms up to capacity, then waitlists and rejects duplicate
     .set('Authorization', `Bearer ${attendeeTwo.token}`);
   assert.equal(myRegistrations.body.registrations[0].status, 'waitlist');
   assert.equal(myRegistrations.body.registrations[0].ticketCode, '');
+});
+
+test('confirmed registrations email event details and ticket code, but waitlisted registrations do not', async (t) => {
+  const messages = [];
+  const { app, db } = setup({
+    mailer: { async sendMail(message) { messages.push(message); } }
+  });
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'confirmation-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const event = await createEvent(app, organizer.token);
+  const attendeeOne = await createUser(app, { email: 'confirmation-one@example.test' });
+  const attendeeTwo = await createUser(app, { email: 'confirmation-two@example.test' });
+
+  const confirmed = await request(app)
+    .post(`/api/events/${event.body.eventId}/register`)
+    .set('Authorization', `Bearer ${attendeeOne.token}`);
+  assert.equal(confirmed.status, 200);
+  const confirmation = messages.find((message) => message.subject === 'Registration confirmed: Future Workshop');
+  assert.ok(confirmation);
+  assert.equal(confirmation.to, 'confirmation-one@example.test');
+  assert.match(confirmation.text, /Future Workshop/);
+  assert.match(confirmation.text, /2099-11-20T10:00/);
+  assert.match(confirmation.text, new RegExp(confirmed.body.ticketCode));
+
+  const confirmationCount = messages.filter((message) => message.subject.startsWith('Registration confirmed:')).length;
+  const waitlisted = await request(app)
+    .post(`/api/events/${event.body.eventId}/register`)
+    .set('Authorization', `Bearer ${attendeeTwo.token}`);
+  assert.equal(waitlisted.status, 200);
+  assert.equal(waitlisted.body.status, 'waitlist');
+  assert.equal(messages.filter((message) => message.subject.startsWith('Registration confirmed:')).length, confirmationCount);
+  assert.equal(attendeeOne.user.email, confirmation.to);
+  assert.equal(attendeeTwo.user.email, 'confirmation-two@example.test');
+});
+
+test('verification and registration mail failures do not fail the API or log message secrets', async (t) => {
+  const originalError = console.error;
+  const logs = [];
+  const smtpPassword = 'secret-smtp-password';
+  const mailer = {
+    async sendMail(message) {
+      throw new Error(`SMTP_PASS=${smtpPassword}; body=${message.text}`);
+    }
+  };
+  const { app, db } = setup({ mailer });
+  t.after(() => {
+    console.error = originalError;
+    db.close();
+  });
+  console.error = (...args) => logs.push(args);
+
+  const attendee = await createUser(app, { email: 'mail-failure@example.test' });
+  const organizer = await createUser(app, { email: 'mail-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const event = await createEvent(app, organizer.token);
+  const registration = await request(app)
+    .post(`/api/events/${event.body.eventId}/register`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+
+  assert.equal(registration.status, 200);
+  assert.equal(registration.body.status, 'confirmed');
+  assert.equal(db.get('SELECT status FROM registrations WHERE user_id = ?', [attendee.user.id]).status, 'confirmed');
+  assert.equal(logs.length, 3);
+  assert.ok(logs.every((entry) => entry.length === 1 && entry[0] === 'Email delivery failed'));
+  assert.doesNotMatch(JSON.stringify(logs), /secret-smtp-password|Verify your email address|EMRS-[0-9a-f]{8}/);
 });
 
 test('registration cancellation promotes the earliest waitlisted attendee and permits re-registration', async (t) => {
