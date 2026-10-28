@@ -886,3 +886,220 @@ test('GET /api/events rejects invalid filters with 400 naming the field', async 
     assert.deepEqual(Object.keys(response.body.fields).sort(), expected, query);
   }
 });
+
+test('POST /api/events/:id/register verifies all EMRS-F-010 acceptance criteria', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'f10_org@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+
+  const attendee1 = await createUser(app, { email: 'f10_att1@example.test' });
+  const attendee2 = await createUser(app, { email: 'f10_att2@example.test' });
+
+  // 1. Create event with capacity 1
+  const eventRes = await createEvent(app, organizer.token, {
+    title: 'F010 Workshop',
+    capacity: 1
+  });
+  assert.equal(eventRes.status, 201);
+  const eventId = eventRes.body.eventId;
+
+  // Given logged out, then 401
+  const unauthRes = await request(app).post(`/api/events/${eventId}/register`);
+  assert.equal(unauthRes.status, 401);
+
+  // Given seats left, then confirmed registration and ticket
+  const reg1 = await request(app)
+    .post(`/api/events/${eventId}/register`)
+    .set('Authorization', `Bearer ${attendee1.token}`);
+  assert.equal(reg1.status, 200);
+  assert.equal(reg1.body.status, 'confirmed');
+  assert.ok(reg1.body.ticketCode);
+  assert.match(reg1.body.ticketCode, /^EMRS-[0-9a-f]{8}$/);
+
+  // Given event full, then join waitlist
+  const reg2 = await request(app)
+    .post(`/api/events/${eventId}/register`)
+    .set('Authorization', `Bearer ${attendee2.token}`);
+  assert.equal(reg2.status, 200);
+  assert.equal(reg2.body.status, 'waitlist');
+
+  // Given already registered, then 409
+  const dupRes = await request(app)
+    .post(`/api/events/${eventId}/register`)
+    .set('Authorization', `Bearer ${attendee1.token}`);
+  assert.equal(dupRes.status, 409);
+  assert.match(dupRes.body.error, /already registered/i);
+
+  // Given a cancelled event, then 400
+  const cancelEventRes = await request(app)
+    .delete(`/api/events/${eventId}`)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(cancelEventRes.status, 200);
+
+  const regOnCancelled = await request(app)
+    .post(`/api/events/${eventId}/register`)
+    .set('Authorization', `Bearer ${attendee1.token}`);
+  assert.equal(regOnCancelled.status, 400);
+  assert.match(regOnCancelled.body.error, /cancelled/i);
+
+  // Given a started event, then 400
+  db.run(
+    `INSERT INTO events (organizer_id, title, description, category, event_date, start_time, start_datetime, end_datetime, venue_type, venue, capacity, ticket_details, price, currency, tags, status, created_at)
+     VALUES (?, 'Started Event', 'Desc', 'Meetup', '2020-01-01', '10:00:00', '2020-01-01T10:00:00Z', '2020-01-01T12:00:00Z', 'physical', 'Hall 2', 10, '[]', 0, 'INR', '[]', 'active', 1000)`,
+    [organizer.user.id]
+  );
+  const pastId = db.get("SELECT id FROM events WHERE title = 'Started Event'").id;
+  const regOnStarted = await request(app)
+    .post(`/api/events/${pastId}/register`)
+    .set('Authorization', `Bearer ${attendee1.token}`);
+  assert.equal(regOnStarted.status, 400);
+  assert.match(regOnStarted.body.error, /started/i);
+});
+
+test('DELETE /api/registrations/:id verifies all EMRS-F-011 acceptance criteria', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'f11_org@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const attendee = await createUser(app, { email: 'f11_att@example.test' });
+  const otherUser = await createUser(app, { email: 'f11_other@example.test' });
+
+  const eventRes = await createEvent(app, organizer.token, {
+    title: 'F011 Cancel Test Event',
+    capacity: 5
+  });
+  assert.equal(eventRes.status, 201);
+  const eventId = eventRes.body.eventId;
+
+  const regRes = await request(app)
+    .post(`/api/events/${eventId}/register`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+  assert.equal(regRes.status, 200);
+  const regId = regRes.body.registrationId;
+  const ticketCode = regRes.body.ticketCode;
+
+  // Given logged out, then 401
+  const unauthCancel = await request(app).delete(`/api/registrations/${regId}`);
+  assert.equal(unauthCancel.status, 401);
+
+  // Given other user tries to cancel, then 404 (only own registration)
+  const otherCancel = await request(app)
+    .delete(`/api/registrations/${regId}`)
+    .set('Authorization', `Bearer ${otherUser.token}`);
+  assert.equal(otherCancel.status, 404);
+
+  // Given I cancel before the event starts, then seat freed and ticket stops working
+  const cancelRes = await request(app)
+    .delete(`/api/registrations/${regId}`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+  assert.equal(cancelRes.status, 200);
+
+  // Ticket stops working: checking in the ticket code is now rejected
+  const checkinRes = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${organizer.token}`)
+    .send({ ticketCode });
+  assert.equal(checkinRes.status, 400);
+  assert.match(checkinRes.body.error, /cancelled/i);
+
+  // Given the event has started, cannot cancel
+  db.run(
+    `INSERT INTO events (organizer_id, title, description, category, event_date, start_time, start_datetime, end_datetime, venue_type, venue, capacity, ticket_details, price, currency, tags, status, created_at)
+     VALUES (?, 'Past Event For Cancel', 'Desc', 'Meetup', '2020-01-01', '10:00:00', '2020-01-01T10:00:00Z', '2020-01-01T12:00:00Z', 'physical', 'Room 4', 10, '[]', 0, 'INR', '[]', 'active', 1000)`,
+    [organizer.user.id]
+  );
+  const pastEventId = db.get("SELECT id FROM events WHERE title = 'Past Event For Cancel'").id;
+  const pastRegInsert = db.run(
+    'INSERT INTO registrations (event_id, user_id, status, created_at) VALUES (?, ?, ?, ?)',
+    [pastEventId, attendee.user.id, 'confirmed', 1000]
+  );
+  const pastRegId = Number(pastRegInsert.lastInsertRowid);
+
+  const lateCancel = await request(app)
+    .delete(`/api/registrations/${pastRegId}`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+  assert.equal(lateCancel.status, 400);
+  assert.match(lateCancel.body.error, /started/i);
+});
+
+test('Check-in verifies all EMRS-F-016 acceptance criteria', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const org1 = await createUser(app, { email: 'f16_org1@example.test' });
+  const org2 = await createUser(app, { email: 'f16_org2@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', org1.user.id]);
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', org2.user.id]);
+
+  const attendee = await createUser(app, { email: 'f16_att@example.test' });
+
+  const eventRes = await createEvent(app, org1.token, {
+    title: 'F016 Check-in Event',
+    capacity: 10
+  });
+  assert.equal(eventRes.status, 201);
+  const eventId = eventRes.body.eventId;
+
+  const regRes = await request(app)
+    .post(`/api/events/${eventId}/register`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+  const ticketCode = regRes.body.ticketCode;
+
+  // Given unauthenticated, then 401
+  const unauthCheckin = await request(app)
+    .post('/api/tickets/checkin')
+    .send({ ticketCode });
+  assert.equal(unauthCheckin.status, 401);
+
+  // Given attendee role (not organizer), then 403
+  const attendeeCheckin = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${attendee.token}`)
+    .send({ ticketCode });
+  assert.equal(attendeeCheckin.status, 403);
+
+  // Given another organizer's event, then 403
+  const otherOrgCheckin = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${org2.token}`)
+    .send({ ticketCode });
+  assert.equal(otherOrgCheckin.status, 403);
+  assert.match(otherOrgCheckin.body.error, /organizer can check in/i);
+
+  // Given an unknown ticket code, then 404
+  const unknownCheckin = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${org1.token}`)
+    .send({ ticketCode: 'EMRS-ffffffff' });
+  assert.equal(unknownCheckin.status, 404);
+
+  // Given a valid ticket and I am the organizer, attendee admitted & time recorded
+  const successCheckin = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${org1.token}`)
+    .send({ ticketCode });
+  assert.equal(successCheckin.status, 200);
+  assert.equal(successCheckin.body.eventTitle, 'F016 Check-in Event');
+
+  // Given the same code again, then 409 already checked in
+  const repeatCheckin = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${org1.token}`)
+    .send({ ticketCode });
+  assert.equal(repeatCheckin.status, 409);
+  assert.match(repeatCheckin.body.error, /already been checked in/i);
+
+  // Ticket validation endpoint GET /api/tickets/:code
+  const validGet = await request(app)
+    .get(`/api/tickets/${ticketCode}`)
+    .set('Authorization', `Bearer ${org1.token}`);
+  assert.equal(validGet.status, 200);
+  assert.equal(validGet.body.checkedIn, true);
+  assert.ok(validGet.body.checkedInAt > 0);
+
+  // Other organizer cannot validate ticket: 403
+  const otherGet = await request(app)
+    .get(`/api/tickets/${ticketCode}`)
+    .set('Authorization', `Bearer ${org2.token}`);
+  assert.equal(otherGet.status, 403);
+});
