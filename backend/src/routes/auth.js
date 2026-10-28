@@ -140,10 +140,10 @@ export function createAuthRouter({
     }
   });
 
-  router.get('/me', authentication.authenticate, rateLimit(createRateLimitOptions(
+  router.get('/me', rateLimit(createRateLimitOptions(
     100,
     protectedRouteRateLimitOptions
-  )), (req, res) => {
+  )), authentication.authenticate, (req, res) => {
     const { id, name, email, phone, role } = req.user;
     res.status(200).json({ user: { id, name, email, phone, role } });
   });

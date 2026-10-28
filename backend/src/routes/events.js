@@ -85,10 +85,10 @@ export function createEventsRouter({
     }
   });
 
-  router.post('/:id/register', authentication.authenticate, rateLimit(createRateLimitOptions(
+  router.post('/:id/register', rateLimit(createRateLimitOptions(
     100,
     registrationRateLimitOptions
-  )), async (req, res, next) => {
+  )), authentication.authenticate, async (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });
