@@ -104,3 +104,23 @@ footer { padding: 18px 0 28px; border-top: 1px solid #e1e6ef; color: #8b93a2; fo
   .checkin form { grid-template-columns: 1fr; }
   .identity { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* Edit / cancel event (EMT-31) */
+.actions .outline { min-height: 40px; border: 1px solid #d9deea; }
+.badge-cancelled { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; color: #a62c3a; background: #ffecee; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; vertical-align: middle; }
+.event-card.cancelled { background: #fafafc; }
+.event-card.cancelled h3, .event-card.cancelled > p:not(.cancelled-note) { color: #7d8697; }
+.cancelled-note { margin: 0 0 12px; color: #a62c3a; font-size: 13px; font-weight: 600; }
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #d46a75; background: #fffafa; }
+.field-error { font-size: 12px; font-weight: 600; }
+.form-error-summary { display: grid; gap: 4px; padding: 10px 12px; border-radius: 9px; color: #a62c3a; background: #ffecee; font-size: 13px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 24px; border: 0; border-radius: 14px; color: #283247; box-shadow: 0 18px 48px #25304b40; }
+.confirm-dialog::backdrop { background: #1b223480; }
+.confirm-dialog h3 { margin: 0 0 8px; }
+.confirm-dialog p { margin: 0; color: #5d687c; line-height: 1.55; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+button:focus-visible { outline: 3px solid #8279ee; outline-offset: 2px; }
+@media (max-width: 560px) {
+  .actions button, .form-actions button, .dialog-actions button { flex: 1 1 auto; }
+}

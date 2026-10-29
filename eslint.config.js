@@ -1,6 +1,6 @@
 export default [
   {
-    files: ['backend/src/**/*.js', 'backend/test/**/*.js', 'frontend/src/**/*.{js,jsx}'],
+    files: ['backend/src/**/*.js', 'backend/test/**/*.js', 'frontend/src/**/*.{js,jsx}', 'frontend/test/**/*.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
