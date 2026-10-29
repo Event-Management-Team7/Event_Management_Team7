@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 
-// Register / cancel-event handlers shared by every page that renders EventCard.
+// Register / cancel-event handlers (the cancel confirmation lives in EventCard's dialog) shared by every page that renders EventCard.
 // `reload` refreshes the calling page's own list afterwards.
 export default function useEventActions({ notify, reload, setBusy = () => {} }) {
   async function registerForEvent(event) {
@@ -20,7 +20,7 @@ export default function useEventActions({ notify, reload, setBusy = () => {} }) 
   }
 
   async function cancelEvent(event) {
-    if (!window.confirm(`Cancel "${event.title}"?`)) return;
+    notify.dismiss();
     try {
       const result = await api(`/api/events/${event.id}`, { method: 'DELETE' });
       notify.setNotice(result.message);

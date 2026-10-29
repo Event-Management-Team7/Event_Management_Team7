@@ -5,12 +5,13 @@
   "type": "module",
   "description": "Event Management and Registration System (EMRS)",
   "scripts": {
-    "test": "npm --prefix backend test",
+    "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "npm --prefix backend test",
-    "lint": "eslint backend/src backend/test frontend/src",
+    "lint": "eslint backend/src backend/test frontend/src frontend/test",
     "start:backend": "npm --prefix backend start",
     "build:frontend": "npm --prefix frontend run build",
-    "dev:frontend": "npm --prefix frontend run dev"
+    "dev:frontend": "npm --prefix frontend run dev",
+    "test:frontend": "npm --prefix frontend test"
   },
   "devDependencies": {
     "eslint": "^9.13.0"
