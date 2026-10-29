@@ -46,6 +46,56 @@ function serializeEvent(row) {
   };
 }
 
+function updateValues(input) {
+  const ticketTypes = input.ticketTypes.map((ticket) => ({
+    ...ticket,
+    quantity: ticket.quantity === undefined ? input.capacity : ticket.quantity
+  }));
+  return {
+    title: input.title.trim(),
+    description: input.description,
+    category: input.category,
+    startDateTime: input.startDateTime,
+    endDateTime: input.endDateTime,
+    venueType: input.venueType,
+    venue: input.venue,
+    meetingLink: input.meetingLink ?? '',
+    capacity: input.capacity,
+    ticketTypes,
+    currency: input.currency ?? 'INR',
+    tags: input.tags ?? []
+  };
+}
+
+function currentEventValues(row) {
+  return {
+    title: row.title,
+    description: row.description,
+    category: row.category,
+    startDateTime: row.start_datetime || (
+      row.start_time ? `${row.event_date}T${row.start_time}` : row.event_date
+    ),
+    endDateTime: row.end_datetime,
+    venueType: row.venue_type === 'virtual' ? 'Virtual' : 'Physical',
+    venue: row.venue,
+    meetingLink: row.meeting_link,
+    capacity: row.capacity,
+    ticketTypes: parseJsonArray(row.ticket_details),
+    currency: row.currency,
+    tags: parseJsonArray(row.tags)
+  };
+}
+
+function changedEventFields(oldValues, newValues) {
+  return Object.keys(newValues)
+    .filter((field) => JSON.stringify(oldValues[field]) !== JSON.stringify(newValues[field]))
+    .map((field) => ({
+      field,
+      oldValue: oldValues[field],
+      newValue: newValues[field]
+    }));
+}
+
 export class EventService {
   constructor(db, clock = () => Math.floor(Date.now() / 1000)) {
     this.db = db;
@@ -130,6 +180,99 @@ export class EventService {
       ]
     );
     return Number(result.lastInsertRowid);
+  }
+
+  update(id, user, input) {
+    const row = this.db.get('SELECT * FROM events WHERE id = ?', [id]);
+    if (!row) return 'not-found';
+    if (user.role !== 'Admin' && (user.role !== 'Organizer' || row.organizer_id !== user.id)) {
+      return 'forbidden';
+    }
+    if (row.status.toLowerCase() === 'cancelled') return 'event-cancelled';
+
+    const startDateTime = row.start_datetime || (
+      row.start_time ? `${row.event_date}T${row.start_time}` : row.event_date
+    );
+    if (new Date(startDateTime).getTime() <= this.clock() * 1000) return 'event-started';
+
+    const confirmedCount = this.db.get(
+      "SELECT COUNT(*) AS count FROM registrations WHERE event_id = ? AND status = 'confirmed'",
+      [id]
+    ).count;
+    if (input.capacity < confirmedCount) return 'capacity-too-low';
+
+    const oldValues = currentEventValues(row);
+    const newValues = updateValues(input);
+    const changes = changedEventFields(oldValues, newValues);
+    const start = newValues.startDateTime;
+    const venueType = newValues.venueType.toLowerCase();
+    const ticketDetails = JSON.stringify(newValues.ticketTypes);
+    const tags = JSON.stringify(newValues.tags);
+    const now = this.clock();
+
+    this.db.transaction(() => {
+      this.db.run(
+        `UPDATE events
+         SET title = ?, description = ?, category = ?, event_date = ?, start_time = ?,
+             start_datetime = ?, end_datetime = ?, venue_type = ?, venue = ?, meeting_link = ?,
+             capacity = ?, ticket_details = ?, price = ?, currency = ?, tags = ?
+         WHERE id = ?`,
+        [
+          newValues.title,
+          newValues.description,
+          newValues.category,
+          start.slice(0, 10),
+          start.slice(11),
+          start,
+          newValues.endDateTime,
+          venueType,
+          newValues.venue,
+          newValues.meetingLink,
+          newValues.capacity,
+          ticketDetails,
+          newValues.ticketTypes[0].price,
+          newValues.currency,
+          tags,
+          id
+        ]
+      );
+      for (const change of changes) {
+        this.db.run(
+          'INSERT INTO audit_logs (user_id, action, details, created_at) VALUES (?, ?, ?, ?)',
+          [user.id, 'event.updated', JSON.stringify({ eventId: id, ...change }), now]
+        );
+      }
+    });
+    return 'updated';
+  }
+
+  auditHistory(id, user) {
+    const event = this.db.get('SELECT organizer_id FROM events WHERE id = ?', [id]);
+    if (!event) return 'not-found';
+    if (user.role !== 'Admin' && (user.role !== 'Organizer' || event.organizer_id !== user.id)) {
+      return 'forbidden';
+    }
+
+    const rows = this.db.all(
+      `SELECT a.id, a.user_id, u.name AS user_name, a.details, a.created_at
+       FROM audit_logs a
+       LEFT JOIN users u ON u.id = a.user_id
+       WHERE a.action = ? AND a.details LIKE ?
+       ORDER BY a.created_at DESC, a.id DESC`,
+      ['event.updated', `{"eventId":${id},%`]
+    );
+    return rows.map((row) => {
+      const details = JSON.parse(row.details);
+      return {
+        id: row.id,
+        userId: row.user_id,
+        userName: row.user_name,
+        timestamp: row.created_at,
+        field: details.field,
+        oldValue: details.oldValue,
+        newValue: details.newValue
+      };
+    });
   }
 
   cancel(id, user) {

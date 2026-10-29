@@ -20,12 +20,31 @@ function organizerOnly(req, res, next) {
   next();
 }
 
+function eventInput(body) {
+  return {
+    title: body.title,
+    description: body.description,
+    category: body.category,
+    startDateTime: body.startDateTime,
+    endDateTime: body.endDateTime,
+    venueType: body.venueType,
+    venue: body.address === undefined ? body.venue : body.address,
+    address: body.address,
+    meetingLink: body.meetingLink,
+    capacity: body.capacity,
+    ticketTypes: body.ticketTypes,
+    currency: body.currency,
+    tags: body.tags
+  };
+}
+
 export function createEventsRouter({
   authentication,
   eventService,
   registrationService,
   mailer,
-  registrationRateLimitOptions
+  registrationRateLimitOptions,
+  protectedRouteRateLimitOptions
 }) {
   const router = Router();
 
@@ -57,21 +76,7 @@ export function createEventsRouter({
       res.status(400).json({ error: 'Malformed JSON' });
       return;
     }
-    const input = {
-      title: req.body.title,
-      description: req.body.description,
-      category: req.body.category,
-      startDateTime: req.body.startDateTime,
-      endDateTime: req.body.endDateTime,
-      venueType: req.body.venueType,
-      venue: req.body.address === undefined ? req.body.venue : req.body.address,
-      address: req.body.address,
-      meetingLink: req.body.meetingLink,
-      capacity: req.body.capacity,
-      ticketTypes: req.body.ticketTypes,
-      currency: req.body.currency,
-      tags: req.body.tags
-    };
+    const input = eventInput(req.body);
     const fields = validateEvent(input, eventService.clock() * 1000);
     if (Object.keys(fields).length) {
       res.status(400).json({ error: 'Validation failed', fields });
@@ -80,6 +85,70 @@ export function createEventsRouter({
     try {
       const eventId = eventService.create(req.user.id, input);
       res.status(201).json({ message: 'Event created successfully', eventId });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put('/:id', rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), authentication.authenticate, (req, res, next) => {
+    const eventId = parsePositiveId(req.params.id);
+    if (!eventId) {
+      res.status(404).json({ error: 'Event not found' });
+      return;
+    }
+    if (!isObjectBody(req.body)) {
+      res.status(400).json({ error: 'Malformed JSON' });
+      return;
+    }
+    const input = eventInput(req.body);
+    const fields = validateEvent(input, eventService.clock() * 1000);
+    if (Object.keys(fields).length) {
+      res.status(400).json({ error: 'Validation failed', fields });
+      return;
+    }
+    try {
+      const result = eventService.update(eventId, req.user, input);
+      if (result === 'not-found') {
+        res.status(404).json({ error: 'Event not found' });
+      } else if (result === 'forbidden') {
+        res.status(403).json({ error: 'Only the event organizer or an admin can update this event.' });
+      } else if (result === 'event-started') {
+        res.status(409).json({ error: 'Event has already started' });
+      } else if (result === 'event-cancelled') {
+        res.status(409).json({ error: 'Cancelled events cannot be edited' });
+      } else if (result === 'capacity-too-low') {
+        res.status(400).json({
+          error: 'Capacity cannot be lower than the current confirmed registration count'
+        });
+      } else {
+        res.status(200).json({ message: 'Event updated successfully', event: eventService.get(eventId) });
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/:id/audit', rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), authentication.authenticate, (req, res, next) => {
+    const eventId = parsePositiveId(req.params.id);
+    if (!eventId) {
+      res.status(404).json({ error: 'Event not found' });
+      return;
+    }
+    try {
+      const result = eventService.auditHistory(eventId, req.user);
+      if (result === 'not-found') {
+        res.status(404).json({ error: 'Event not found' });
+      } else if (result === 'forbidden') {
+        res.status(403).json({ error: 'Only the event organizer or an admin can view this event audit history.' });
+      } else {
+        res.status(200).json({ audit: result });
+      }
     } catch (error) {
       next(error);
     }

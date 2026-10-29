@@ -84,6 +84,13 @@ async function createEvent(app, token, overrides = {}) {
   return response;
 }
 
+async function updateEvent(app, eventId, token, overrides = {}) {
+  return request(app)
+    .put(`/api/events/${eventId}`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ ...VALID_EVENT, ...overrides });
+}
+
 test('health routes return the existing response shape', async (t) => {
   const { app, db } = setup();
   t.after(() => db.close());
@@ -125,6 +132,30 @@ test('authenticated profile and event registration routes enforce independent ra
   const limitedRegistration = await register();
   assert.equal(limitedRegistration.status, 429);
   assert.deepEqual(limitedRegistration.body, { error: 'Too many requests, please try again later.' });
+});
+
+test('event update and audit routes apply rate limits before authentication', async (t) => {
+  const { app, db } = setup({
+    protectedRouteRateLimitOptions: { windowMs: 60_000, limit: 1 }
+  });
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'event-rate-limit@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const created = await createEvent(app, organizer.token);
+  const eventPath = `/api/events/${created.body.eventId}`;
+
+  assert.equal((await request(app).put(eventPath).send(VALID_EVENT)).status, 401);
+  const limitedUpdate = await request(app)
+    .put(eventPath)
+    .set('Authorization', `Bearer ${organizer.token}`)
+    .send(VALID_EVENT);
+  assert.equal(limitedUpdate.status, 429);
+
+  assert.equal((await request(app).get(`${eventPath}/audit`)).status, 401);
+  const limitedAudit = await request(app)
+    .get(`${eventPath}/audit`)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(limitedAudit.status, 429);
 });
 
 test('public registration, verification, and login routes use separate rate limits', async (t) => {
@@ -656,6 +687,192 @@ test('event creation trims title and returns the complete persisted EMT-14 event
     registeredCount: 0,
     status: 'Upcoming'
   });
+});
+
+test('event owner can update an event and audit records only changed fields', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'update-owner@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const created = await createEvent(app, organizer.token);
+
+  const update = await updateEvent(app, created.body.eventId, organizer.token, {
+    title: 'Updated Workshop',
+    address: 'Hall B'
+  });
+  assert.equal(update.status, 200, update.text);
+  assert.equal(update.body.event.title, 'Updated Workshop');
+  assert.equal(update.body.event.venue, 'Hall B');
+  assert.equal(update.body.event.organizerId, organizer.user.id);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 2);
+
+  const history = await request(app)
+    .get(`/api/events/${created.body.eventId}/audit`)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(history.status, 200, history.text);
+  assert.equal(history.body.audit.length, 2);
+  assert.deepEqual(history.body.audit.map((entry) => entry.field).sort(), ['title', 'venue']);
+  assert.deepEqual(history.body.audit.map((entry) => entry.userId), [organizer.user.id, organizer.user.id]);
+  assert.deepEqual(history.body.audit.map((entry) => entry.timestamp), [FIXED_NOW, FIXED_NOW]);
+  const titleChange = history.body.audit.find((entry) => entry.field === 'title');
+  assert.equal(titleChange.userName, 'Test User');
+  assert.equal(titleChange.oldValue, 'Future Workshop');
+  assert.equal(titleChange.newValue, 'Updated Workshop');
+  const venueChange = history.body.audit.find((entry) => entry.field === 'venue');
+  assert.equal(venueChange.oldValue, 'Hall A');
+  assert.equal(venueChange.newValue, 'Hall B');
+
+  const unchanged = await updateEvent(app, created.body.eventId, organizer.token, {
+    title: 'Updated Workshop',
+    address: 'Hall B'
+  });
+  assert.equal(unchanged.status, 200, unchanged.text);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 2);
+});
+
+test('event update authorization allows admins and rejects attendees, other organizers, and anonymous users', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const owner = await createUser(app, { email: 'authorization-owner@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', owner.user.id]);
+  const otherOrganizer = await createUser(app, { email: 'authorization-other@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', otherOrganizer.user.id]);
+  const attendee = await createUser(app, { email: 'authorization-attendee@example.test' });
+  const admin = await createUser(app, { email: 'authorization-admin@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Admin', admin.user.id]);
+  const created = await createEvent(app, owner.token);
+  const eventPath = `/api/events/${created.body.eventId}`;
+
+  assert.equal((await request(app).put(eventPath).send(VALID_EVENT)).status, 401);
+  assert.equal((await updateEvent(app, created.body.eventId, otherOrganizer.token, { title: 'No Access' })).status, 403);
+  assert.equal((await updateEvent(app, created.body.eventId, attendee.token, { title: 'No Access' })).status, 403);
+  assert.equal((await updateEvent(app, 99999, owner.token)).status, 404);
+
+  const adminUpdate = await updateEvent(app, created.body.eventId, admin.token, { title: 'Admin Updated Workshop' });
+  assert.equal(adminUpdate.status, 200, adminUpdate.text);
+  assert.equal(adminUpdate.body.event.title, 'Admin Updated Workshop');
+});
+
+test('event updates use create-event validation and leave invalid events unchanged', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'update-validation@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const created = await createEvent(app, organizer.token);
+  const path = `/api/events/${created.body.eventId}`;
+  const original = (await request(app).get(path)).body.event;
+
+  const invalidCases = [
+    { startDateTime: '2020-01-01T10:00' },
+    { endDateTime: '2099-11-20T09:00' },
+    { capacity: 0 },
+    {
+      title: '',
+      startDateTime: '2020-01-01T10:00',
+      endDateTime: '2019-01-01T10:00',
+      capacity: 0,
+      ticketTypes: []
+    }
+  ];
+  for (const invalid of invalidCases) {
+    const response = await updateEvent(app, created.body.eventId, organizer.token, invalid);
+    assert.equal(response.status, 400, response.text);
+    assert.equal(response.body.error, 'Validation failed');
+    assert.ok(Object.keys(response.body.fields).length > 0);
+    assert.deepEqual((await request(app).get(path)).body.event, original);
+  }
+  const multiInvalid = await updateEvent(app, created.body.eventId, organizer.token, invalidCases[3]);
+  assert.deepEqual(Object.keys(multiInvalid.body.fields).sort(), [
+    'capacity',
+    'endDateTime',
+    'startDateTime',
+    'ticketTypes',
+    'title'
+  ]);
+});
+
+test('event update rejects capacity below confirmed registrations without changing the event', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'update-capacity-owner@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const created = await createEvent(app, organizer.token, {
+    capacity: 2,
+    ticketTypes: [{ name: 'General Admission', price: 15.5, quantity: 2 }]
+  });
+  const attendeeOne = await createUser(app, { email: 'update-capacity-one@example.test' });
+  const attendeeTwo = await createUser(app, { email: 'update-capacity-two@example.test' });
+  for (const attendee of [attendeeOne, attendeeTwo]) {
+    const registration = await request(app)
+      .post(`/api/events/${created.body.eventId}/register`)
+      .set('Authorization', `Bearer ${attendee.token}`);
+    assert.equal(registration.status, 200, registration.text);
+    assert.equal(registration.body.status, 'confirmed');
+  }
+
+  const path = `/api/events/${created.body.eventId}`;
+  const original = (await request(app).get(path)).body.event;
+  const response = await updateEvent(app, created.body.eventId, organizer.token, {
+    capacity: 1,
+    ticketTypes: [{ name: 'General Admission', price: 15.5, quantity: 1 }]
+  });
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /capacity cannot be lower than the current confirmed registration count/i);
+  assert.deepEqual((await request(app).get(path)).body.event, original);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 0);
+});
+
+test('started and cancelled events cannot be updated', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'update-state-owner@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const started = await createEvent(app, organizer.token);
+  db.run(
+    'UPDATE events SET start_datetime = ?, event_date = ?, start_time = ? WHERE id = ?',
+    ['2020-01-01T10:00', '2020-01-01', '10:00', started.body.eventId]
+  );
+  const startedPath = `/api/events/${started.body.eventId}`;
+  const startedBefore = (await request(app).get(startedPath)).body.event;
+  const startedUpdate = await updateEvent(app, started.body.eventId, organizer.token, { title: 'Too Late' });
+  assert.equal(startedUpdate.status, 409);
+  assert.equal(startedUpdate.body.error, 'Event has already started');
+  assert.deepEqual((await request(app).get(startedPath)).body.event, startedBefore);
+
+  const cancelled = await createEvent(app, organizer.token, { title: 'Cancelled Workshop' });
+  const cancelResponse = await request(app)
+    .delete(`/api/events/${cancelled.body.eventId}`)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(cancelResponse.status, 200);
+  const cancelledPath = `/api/events/${cancelled.body.eventId}`;
+  const cancelledBefore = (await request(app).get(cancelledPath)).body.event;
+  const cancelledUpdate = await updateEvent(app, cancelled.body.eventId, organizer.token, { title: 'Too Late' });
+  assert.equal(cancelledUpdate.status, 409);
+  assert.match(cancelledUpdate.body.error, /cancelled/i);
+  assert.deepEqual((await request(app).get(cancelledPath)).body.event, cancelledBefore);
+});
+
+test('event audit history is restricted to the event owner or an admin', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const owner = await createUser(app, { email: 'audit-owner@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', owner.user.id]);
+  const otherOrganizer = await createUser(app, { email: 'audit-other@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', otherOrganizer.user.id]);
+  const attendee = await createUser(app, { email: 'audit-attendee@example.test' });
+  const admin = await createUser(app, { email: 'audit-admin@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Admin', admin.user.id]);
+  const created = await createEvent(app, owner.token);
+  await updateEvent(app, created.body.eventId, owner.token, { title: 'Audited Workshop' });
+  const auditPath = `/api/events/${created.body.eventId}/audit`;
+
+  assert.equal((await request(app).get(auditPath)).status, 401);
+  assert.equal((await request(app).get(auditPath).set('Authorization', `Bearer ${otherOrganizer.token}`)).status, 403);
+  assert.equal((await request(app).get(auditPath).set('Authorization', `Bearer ${attendee.token}`)).status, 403);
+  assert.equal((await request(app).get('/api/events/99999/audit')
+    .set('Authorization', `Bearer ${owner.token}`)).status, 404);
+  assert.equal((await request(app).get(auditPath)
+    .set('Authorization', `Bearer ${admin.token}`)).status, 200);
 });
 
 test('event creation reports every missing required field', async (t) => {
