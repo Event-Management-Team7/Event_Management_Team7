@@ -1521,3 +1521,208 @@ test('Check-in verifies all EMRS-F-016 acceptance criteria', async (t) => {
     .set('Authorization', `Bearer ${org2.token}`);
   assert.equal(otherGet.status, 403);
 });
+
+test('DELETE /api/events/:id cancels the event, registrations, tickets, and notifies all attendees once', async (t) => {
+  const sentMessages = [];
+  const mailer = { async sendMail(message) { sentMessages.push(message); } };
+  const { app, db } = setup({
+    mailer,
+    publicAuthRateLimitOptions: {
+      registration: { windowMs: 60_000, limit: 20 }
+    }
+  });
+  t.after(() => db.close());
+
+  const organizer = await createUser(app, { email: 'emt16-organizer@example.test' });
+  const otherOrganizer = await createUser(app, { email: 'emt16-other-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id IN (?, ?)', [
+    'Organizer',
+    organizer.user.id,
+    otherOrganizer.user.id
+  ]);
+  const attendees = [];
+  for (let index = 1; index <= 5; index += 1) {
+    attendees.push(await createUser(app, { email: `emt16-attendee-${index}@example.test` }));
+  }
+  const event = await createEvent(app, organizer.token, {
+    title: 'EMT-16 Community Workshop',
+    startDateTime: '2099-11-20T10:00:00',
+    capacity: 3
+  });
+  assert.equal(event.status, 201);
+
+  const registrations = [];
+  for (const attendee of attendees) {
+    const registration = await request(app)
+      .post(`/api/events/${event.body.eventId}/register`)
+      .set('Authorization', `Bearer ${attendee.token}`);
+    assert.equal(registration.status, 200);
+    registrations.push(registration.body);
+  }
+  assert.deepEqual(registrations.map(({ status }) => status), [
+    'confirmed', 'confirmed', 'confirmed', 'waitlist', 'waitlist'
+  ]);
+  sentMessages.length = 0;
+
+  const eventPath = `/api/events/${event.body.eventId}`;
+  const unauthenticated = await request(app).delete(eventPath);
+  assert.equal(unauthenticated.status, 401);
+
+  const deniedOrganizer = await request(app)
+    .delete(eventPath)
+    .set('Authorization', `Bearer ${otherOrganizer.token}`);
+  assert.equal(deniedOrganizer.status, 403);
+  const deniedAttendee = await request(app)
+    .delete(eventPath)
+    .set('Authorization', `Bearer ${attendees[0].token}`);
+  assert.equal(deniedAttendee.status, 403);
+  assert.equal(db.get('SELECT status FROM events WHERE id = ?', [event.body.eventId]).status, 'Upcoming');
+  assert.deepEqual(
+    db.all('SELECT status FROM registrations WHERE event_id = ? ORDER BY id', [event.body.eventId])
+      .map(({ status }) => status),
+    ['confirmed', 'confirmed', 'confirmed', 'waitlist', 'waitlist']
+  );
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 0);
+  assert.equal(sentMessages.length, 0);
+
+  const cancelled = await request(app)
+    .delete(eventPath)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(cancelled.status, 200, cancelled.text);
+  assert.equal(db.get('SELECT status FROM events WHERE id = ?', [event.body.eventId]).status, 'cancelled');
+  assert.deepEqual(
+    db.all('SELECT status FROM registrations WHERE event_id = ? ORDER BY id', [event.body.eventId])
+      .map(({ status }) => status),
+    ['cancelled', 'cancelled', 'cancelled', 'cancelled', 'cancelled']
+  );
+  assert.equal(sentMessages.length, 5);
+  assert.deepEqual(
+    sentMessages.map(({ to }) => to).sort(),
+    attendees.map(({ user }) => user.email).sort()
+  );
+  for (const message of sentMessages) {
+    assert.match(message.subject, /EMT-16 Community Workshop/);
+    assert.match(message.text, /EMT-16 Community Workshop/);
+    assert.match(message.text, /2099-11-20/);
+  }
+
+  const audit = db.get(
+    'SELECT user_id, action, details FROM audit_logs ORDER BY id DESC LIMIT 1'
+  );
+  assert.equal(audit.user_id, organizer.user.id);
+  assert.equal(audit.action, 'event_cancelled');
+  assert.deepEqual(JSON.parse(audit.details), {
+    eventId: event.body.eventId,
+    title: 'EMT-16 Community Workshop'
+  });
+
+  const rejectedCheckIn = await request(app)
+    .post('/api/tickets/checkin')
+    .set('Authorization', `Bearer ${organizer.token}`)
+    .send({ ticketCode: registrations[0].ticketCode });
+  assert.equal(rejectedCheckIn.status, 400);
+  assert.match(rejectedCheckIn.body.error, /cancelled/i);
+
+  const repeatedCancellation = await request(app)
+    .delete(eventPath)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(repeatedCancellation.status, 409);
+  assert.equal(sentMessages.length, 5);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 1);
+  assert.equal(
+    db.get('SELECT COUNT(*) AS count FROM registrations WHERE event_id = ? AND status != ?', [
+      event.body.eventId,
+      'cancelled'
+    ]).count,
+    0
+  );
+
+  const registrationAfterCancellation = await request(app)
+    .post(`${eventPath}/register`)
+    .set('Authorization', `Bearer ${attendees[0].token}`);
+  assert.equal(registrationAfterCancellation.status, 400);
+  assert.match(registrationAfterCancellation.body.error, /cancelled/i);
+
+  const startedEvent = await createEvent(app, organizer.token, {
+    title: 'Already Started Workshop'
+  });
+  assert.equal(startedEvent.status, 201);
+  db.run(
+    `UPDATE events
+     SET event_date = '2020-01-01', start_time = '10:00:00',
+         start_datetime = '2020-01-01T10:00:00Z'
+     WHERE id = ?`,
+    [startedEvent.body.eventId]
+  );
+  const startedCancellation = await request(app)
+    .delete(`/api/events/${startedEvent.body.eventId}`)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(startedCancellation.status, 409);
+  assert.equal(startedCancellation.body.error, 'Event has already started');
+  assert.equal(db.get('SELECT status FROM events WHERE id = ?', [startedEvent.body.eventId]).status, 'Upcoming');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 1);
+  assert.equal(sentMessages.length, 5);
+});
+
+test('DELETE /api/events/:id stays successful and logs individual mail failures', async (t) => {
+  let failDelivery = false;
+  const attempts = [];
+  const mailer = {
+    async sendMail(message) {
+      attempts.push(message);
+      if (failDelivery) throw new Error('SMTP unavailable');
+    }
+  };
+  const { app, db } = setup({ mailer });
+  t.after(() => db.close());
+
+  const organizer = await createUser(app, { email: 'emt16-failure-organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const attendee = await createUser(app, { email: 'emt16-failure-attendee@example.test' });
+  const event = await createEvent(app, organizer.token, {
+    title: 'Mail Failure Workshop',
+    startDateTime: '2099-12-01T10:00:00',
+    endDateTime: '2099-12-01T12:00:00',
+    capacity: 1
+  });
+  const registration = await request(app)
+    .post(`/api/events/${event.body.eventId}/register`)
+    .set('Authorization', `Bearer ${attendee.token}`);
+  assert.equal(registration.status, 200);
+  attempts.length = 0;
+  failDelivery = true;
+
+  const originalError = console.error;
+  const logs = [];
+  console.error = (...args) => logs.push(args);
+  try {
+    const cancelled = await request(app)
+      .delete(`/api/events/${event.body.eventId}`)
+      .set('Authorization', `Bearer ${organizer.token}`);
+    assert.equal(cancelled.status, 200);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].to, attendee.user.email);
+  assert.deepEqual(logs, [['Email delivery failed']]);
+  assert.equal(db.get('SELECT status FROM events WHERE id = ?', [event.body.eventId]).status, 'cancelled');
+  assert.equal(
+    db.get('SELECT status FROM registrations WHERE id = ?', [registration.body.registrationId]).status,
+    'cancelled'
+  );
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 1);
+});
+
+test('DELETE /api/events/:id applies its protected-route rate limit before authentication', async (t) => {
+  const { app, db } = setup({
+    protectedRouteRateLimitOptions: { windowMs: 60_000, limit: 1 }
+  });
+  t.after(() => db.close());
+
+  const first = await request(app).delete('/api/events/1');
+  assert.equal(first.status, 401);
+  const limited = await request(app).delete('/api/events/1');
+  assert.equal(limited.status, 429);
+  assert.deepEqual(limited.body, { error: 'Too many requests, please try again later.' });
+});

@@ -211,7 +211,10 @@ export function createEventsRouter({
     res.status(200).json({ event });
   });
 
-  router.delete('/:id', authentication.authenticate, (req, res, next) => {
+  router.delete('/:id', rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), authentication.authenticate, async (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });
@@ -223,7 +226,21 @@ export function createEventsRouter({
         res.status(404).json({ error: 'Event not found' });
       } else if (result === 'forbidden') {
         res.status(403).json({ error: 'Only the event organizer can cancel this event.' });
+      } else if (result.result === 'already-cancelled') {
+        res.status(409).json({ error: 'Event has already been cancelled' });
+      } else if (result.result === 'event-started') {
+        res.status(409).json({ error: 'Event has already started' });
       } else {
+        for (const attendee of result.attendees) {
+          await sendMailSafely(mailer, {
+            to: attendee.email,
+            subject: `Event cancelled: ${result.eventTitle}`,
+            text: [
+              `The event "${result.eventTitle}" scheduled for ${result.eventDate} has been cancelled.`,
+              'We apologize for the inconvenience.'
+            ].join('\n')
+          });
+        }
         res.status(200).json({ message: 'Event cancelled successfully' });
       }
     } catch (error) {

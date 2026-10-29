@@ -276,10 +276,48 @@ export class EventService {
   }
 
   cancel(id, user) {
-    const event = this.db.get('SELECT organizer_id FROM events WHERE id = ?', [id]);
-    if (!event) return 'not-found';
-    if (user.role !== 'Admin' && event.organizer_id !== user.id) return 'forbidden';
-    this.db.run("UPDATE events SET status = 'cancelled' WHERE id = ?", [id]);
-    return 'cancelled';
+    return this.db.transaction(() => {
+      const event = this.db.get(
+        `SELECT organizer_id, title, event_date, start_time, start_datetime, status
+         FROM events WHERE id = ?`,
+        [id]
+      );
+      if (!event) return 'not-found';
+      if (user.role !== 'Admin' && event.organizer_id !== user.id) return 'forbidden';
+      if (event.status === 'cancelled') return { result: 'already-cancelled' };
+
+      const startIso = event.start_datetime || (
+        event.start_time ? `${event.event_date}T${event.start_time}` : event.event_date
+      );
+      const startTimeSec = Math.floor(new Date(startIso).getTime() / 1000);
+      if (startTimeSec && startTimeSec <= this.clock()) {
+        return { result: 'event-started' };
+      }
+
+      const attendees = this.db.all(
+        `SELECT u.email FROM registrations r
+         JOIN users u ON u.id = r.user_id
+         WHERE r.event_id = ? AND r.status IN ('confirmed', 'waitlist')
+         ORDER BY r.id`,
+        [id]
+      );
+      this.db.run("UPDATE events SET status = 'cancelled' WHERE id = ?", [id]);
+      this.db.run(
+        `UPDATE registrations SET status = 'cancelled'
+         WHERE event_id = ? AND status IN ('confirmed', 'waitlist')`,
+        [id]
+      );
+      this.db.run(
+        'INSERT INTO audit_logs (user_id, action, details, created_at) VALUES (?, ?, ?, ?)',
+        [user.id, 'event_cancelled', JSON.stringify({ eventId: id, title: event.title }), this.clock()]
+      );
+
+      return {
+        result: 'cancelled',
+        eventTitle: event.title,
+        eventDate: event.event_date,
+        attendees
+      };
+    });
   }
 }
