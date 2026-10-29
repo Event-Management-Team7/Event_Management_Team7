@@ -58,7 +58,8 @@ export function createApp({
     eventService,
     registrationService,
     mailer: resolvedMailer,
-    registrationRateLimitOptions: protectedRouteRateLimitOptions
+    registrationRateLimitOptions: protectedRouteRateLimitOptions,
+    protectedRouteRateLimitOptions
   }));
   app.use('/api/registrations', createRegistrationsRouter({ authentication, registrationService, mailer: resolvedMailer }));
   app.use('/api/tickets', createTicketsRouter({ authService, authentication, ticketService, mailer: resolvedMailer }));

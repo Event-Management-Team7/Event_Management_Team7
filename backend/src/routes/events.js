@@ -43,7 +43,8 @@ export function createEventsRouter({
   eventService,
   registrationService,
   mailer,
-  registrationRateLimitOptions
+  registrationRateLimitOptions,
+  protectedRouteRateLimitOptions
 }) {
   const router = Router();
 
@@ -89,7 +90,10 @@ export function createEventsRouter({
     }
   });
 
-  router.put('/:id', authentication.authenticate, (req, res, next) => {
+  router.put('/:id', rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), authentication.authenticate, (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });
@@ -127,7 +131,10 @@ export function createEventsRouter({
     }
   });
 
-  router.get('/:id/audit', authentication.authenticate, (req, res, next) => {
+  router.get('/:id/audit', rateLimit(createRateLimitOptions(
+    100,
+    protectedRouteRateLimitOptions
+  )), authentication.authenticate, (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });

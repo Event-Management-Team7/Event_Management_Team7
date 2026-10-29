@@ -134,6 +134,30 @@ test('authenticated profile and event registration routes enforce independent ra
   assert.deepEqual(limitedRegistration.body, { error: 'Too many requests, please try again later.' });
 });
 
+test('event update and audit routes apply rate limits before authentication', async (t) => {
+  const { app, db } = setup({
+    protectedRouteRateLimitOptions: { windowMs: 60_000, limit: 1 }
+  });
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'event-rate-limit@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const created = await createEvent(app, organizer.token);
+  const eventPath = `/api/events/${created.body.eventId}`;
+
+  assert.equal((await request(app).put(eventPath).send(VALID_EVENT)).status, 401);
+  const limitedUpdate = await request(app)
+    .put(eventPath)
+    .set('Authorization', `Bearer ${organizer.token}`)
+    .send(VALID_EVENT);
+  assert.equal(limitedUpdate.status, 429);
+
+  assert.equal((await request(app).get(`${eventPath}/audit`)).status, 401);
+  const limitedAudit = await request(app)
+    .get(`${eventPath}/audit`)
+    .set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(limitedAudit.status, 429);
+});
+
 test('public registration, verification, and login routes use separate rate limits', async (t) => {
   const messages = [];
   const { app, db } = setup({
