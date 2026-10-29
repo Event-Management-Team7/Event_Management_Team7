@@ -94,6 +94,56 @@ test('EventService: organizer authorization and access control', (t) => {
   assert.equal(events.cancel(99999, { id: org1.id, role: org1.role }), 'not-found');
 });
 
+test('EventService: rolls back the event update when audit insertion fails', (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const auth = new AuthService(db, { cost: 4 });
+  const events = new EventService(db, () => 1_800_000_000);
+  const organizer = auth.register({
+    name: 'Rollback Organizer',
+    email: 'rollback@example.test',
+    password: 'SecurePassword123',
+    role: 'Organizer'
+  });
+  const eventId = events.create(organizer.id, {
+    title: 'Original Workshop',
+    description: 'A practical workshop.',
+    category: 'Workshop',
+    startDateTime: '2099-11-20T10:00',
+    endDateTime: '2099-11-20T12:00',
+    venueType: 'Physical',
+    venue: 'Hall A',
+    capacity: 10,
+    ticketTypes: [{ name: 'General Admission', price: 15.5, quantity: 10 }]
+  });
+  const run = db.run.bind(db);
+  let auditInserts = 0;
+  db.run = (sql, params) => {
+    if (sql.startsWith('INSERT INTO audit_logs')) {
+      auditInserts += 1;
+      if (auditInserts === 2) throw new Error('Injected audit insert failure');
+    }
+    return run(sql, params);
+  };
+
+  assert.throws(() => events.update(eventId, organizer, {
+    title: 'Changed Workshop',
+    description: 'A practical workshop.',
+    category: 'Workshop',
+    startDateTime: '2099-11-20T10:00',
+    endDateTime: '2099-11-20T12:00',
+    venueType: 'Physical',
+    venue: 'Hall B',
+    capacity: 10,
+    ticketTypes: [{ name: 'General Admission', price: 15.5, quantity: 10 }]
+  }), /Injected audit insert failure/);
+
+  db.run = run;
+  assert.equal(events.get(eventId).title, 'Original Workshop');
+  assert.equal(events.get(eventId).venue, 'Hall A');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 0);
+});
+
 function seedFilterEvents(db) {
   const auth = new AuthService(db, { cost: 4 });
   const events = new EventService(db);
