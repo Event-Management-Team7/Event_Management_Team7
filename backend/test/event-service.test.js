@@ -46,7 +46,11 @@ test('EventService: creates, lists, filters, and cancels events', (t) => {
 
   // Cancel event by owner
   const cancelResult = events.cancel(eventId, { id: org.id, role: org.role });
-  assert.equal(cancelResult, 'cancelled');
+  assert.equal(cancelResult.result, 'cancelled');
+  assert.equal(cancelResult.eventTitle, 'Tech Symposium 2026');
+  assert.equal(cancelResult.eventDate, '2026-11-20');
+  assert.deepEqual(cancelResult.attendees, []);
+  assert.equal(events.cancel(eventId, { id: org.id, role: org.role }).result, 'already-cancelled');
 
   // List should now exclude cancelled event
   const activeList = events.list();
@@ -98,7 +102,7 @@ test('EventService: rolls back the event update when audit insertion fails', (t)
   const db = new Database(':memory:');
   t.after(() => db.close());
   const auth = new AuthService(db, { cost: 4 });
-  const events = new EventService(db, () => 1_800_000_000);
+  const events = new EventService(db);
   const organizer = auth.register({
     name: 'Rollback Organizer',
     email: 'rollback@example.test',
@@ -141,6 +145,33 @@ test('EventService: rolls back the event update when audit insertion fails', (t)
   db.run = run;
   assert.equal(events.get(eventId).title, 'Original Workshop');
   assert.equal(events.get(eventId).venue, 'Hall A');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 0);
+});
+
+test('EventService: rejects cancellation after the event starts without changing state', (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const auth = new AuthService(db, { cost: 4 });
+  const events = new EventService(db, () => 1_800_000_000);
+  const organizer = auth.register({
+    name: 'Started Event Organizer',
+    email: 'started-organizer@example.test',
+    password: 'Password123',
+    role: 'Organizer'
+  });
+  const eventId = events.create(organizer.id, {
+    title: 'Started Workshop',
+    description: 'Already underway',
+    category: 'Workshop',
+    startDateTime: '2020-01-01T10:00:00Z',
+    endDateTime: '2020-01-01T12:00:00Z',
+    venueType: 'Physical',
+    venue: 'Hall A',
+    capacity: 5,
+    ticketTypes: [{ name: 'General', price: 0 }]
+  });
+  assert.equal(events.cancel(eventId, { id: organizer.id, role: 'Organizer' }).result, 'event-started');
+  assert.equal(db.get('SELECT status FROM events WHERE id = ?', [eventId]).status, 'Upcoming');
   assert.equal(db.get('SELECT COUNT(*) AS count FROM audit_logs').count, 0);
 });
 
