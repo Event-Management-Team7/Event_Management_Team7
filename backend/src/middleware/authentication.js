@@ -25,5 +25,14 @@ export function createAuthentication(authService) {
     };
   }
 
-  return { authenticate, authorize };
+  // Unverified users can sign in but cannot create or register for events (EMT-28).
+  function requireVerifiedEmail(req, res, next) {
+    if (!req.user.emailVerified) {
+      res.status(403).json({ error: 'Please verify your email', code: 'email_not_verified' });
+      return;
+    }
+    next();
+  }
+
+  return { authenticate, authorize, requireVerifiedEmail };
 }
