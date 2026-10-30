@@ -11,6 +11,8 @@ const FIXED_NOW = 1_800_000_000;
 const dbByApp = new WeakMap();
 const VALID_PASSWORD = 'SecurePass123';
 const JWT_SECRET = 'test-secret-for-unit-tests-only';
+// Offline CAPTCHA test mode (the default outside production) accepts any token except 'test-fail'.
+const CAPTCHA_PASS = 'test-pass';
 const VALID_EVENT = {
   title: 'Future Workshop',
   description: 'A practical workshop.',
@@ -27,7 +29,9 @@ function setup({
   mailer,
   appBaseUrl = 'https://emrs.example.test',
   protectedRouteRateLimitOptions,
-  publicAuthRateLimitOptions
+  publicAuthRateLimitOptions,
+  captcha,
+  trustProxy
 } = {}) {
   const db = new Database(':memory:');
   const app = createApp({
@@ -37,6 +41,8 @@ function setup({
     jwtSecret: JWT_SECRET,
     mailer,
     appBaseUrl,
+    captcha,
+    trustProxy,
     protectedRouteRateLimitOptions,
     publicAuthRateLimitOptions
   });
@@ -81,7 +87,8 @@ async function createUser(
     email,
     phone: '9876543210',
     password: VALID_PASSWORD,
-    role
+    role,
+    captchaToken: CAPTCHA_PASS
   });
   assert.equal(registration.status, 201, registration.text);
   assert.equal(registration.body.user.role, 'Attendee');
@@ -216,7 +223,8 @@ const REGISTRATION = {
   name: 'Example Person',
   email: 'example@example.test',
   password: VALID_PASSWORD,
-  role: 'Attendee'
+  role: 'Attendee',
+  captchaToken: CAPTCHA_PASS
 };
 
 test('AC1: registration creates an Attendee or Organizer account without exposing the password', async (t) => {
@@ -539,6 +547,198 @@ test('a failed verification email never fails registration or resend', async (t)
   assert.equal(resend.status, 200);
 });
 
+// ---- EMT-29: rate limiting and CAPTCHA ----
+
+const loginAs = (app, email, password, extra = {}) =>
+  request(app).post('/api/auth/login').send({ email, password, ...extra });
+
+test('EMT-29 AC1: the 11th login request from one IP within a minute returns 429 with Retry-After', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const statuses = [];
+  let last;
+  for (let attempt = 1; attempt <= 11; attempt += 1) {
+    last = await loginAs(app, 'someone@example.test', 'WrongPass123');
+    statuses.push(last.status);
+  }
+  assert.equal(statuses.slice(0, 10).includes(429), false, statuses.join(','));
+  assert.equal(last.status, 429);
+  const retryAfter = Number(last.headers['retry-after']);
+  assert.ok(retryAfter >= 1 && retryAfter <= 60, `Retry-After was ${last.headers['retry-after']}`);
+});
+
+test('EMT-29: registration and resend-verification are limited to 10 requests per minute per IP', async (t) => {
+  const messages = [];
+  const { app, db } = setup({
+    mailer: { async sendMail(message) { messages.push(message); } },
+    publicAuthRateLimitOptions: { resendVerificationPerUser: { limit: 100 } }
+  });
+  t.after(() => db.close());
+
+  const registrations = [];
+  for (let index = 1; index <= 11; index += 1) {
+    registrations.push((await request(app).post('/api/auth/register')
+      .send({ ...REGISTRATION, email: `user${index}@example.test` })).status);
+  }
+  assert.deepEqual(registrations.slice(0, 10), Array(10).fill(201));
+  assert.equal(registrations[10], 429);
+
+  const { app: resendApp, db: resendDb } = setup({
+    mailer: { async sendMail(message) { messages.push(message); } },
+    publicAuthRateLimitOptions: { resendVerificationPerUser: { limit: 100 } }
+  });
+  t.after(() => resendDb.close());
+  const user = await createUser(resendApp, { email: 'resend-ip@example.test', verified: false });
+  const resends = [];
+  let lastResend;
+  for (let index = 1; index <= 11; index += 1) {
+    lastResend = await request(resendApp).post('/api/auth/resend-verification')
+      .set('Authorization', `Bearer ${user.token}`);
+    resends.push(lastResend.status);
+  }
+  assert.deepEqual(resends.slice(0, 10), Array(10).fill(200));
+  assert.equal(lastResend.status, 429);
+  assert.ok(Number(lastResend.headers['retry-after']) > 0);
+});
+
+test('EMT-29 AC2: registration without a CAPTCHA token returns 400 "CAPTCHA required" and creates no account', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  for (const captchaToken of [undefined, '', '   ', 42]) {
+    const body = { ...REGISTRATION, captchaToken };
+    if (captchaToken === undefined) delete body.captchaToken;
+    const response = await request(app).post('/api/auth/register').send(body);
+    assert.equal(response.status, 400, String(captchaToken));
+    assert.equal(response.body.error, 'CAPTCHA required');
+  }
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+});
+
+test('EMT-29 AC3: a failed CAPTCHA check returns 400 and creates no account', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const response = await request(app).post('/api/auth/register').send({ ...REGISTRATION, captchaToken: 'test-fail' });
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'CAPTCHA verification failed');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+
+  const tooLong = await request(app).post('/api/auth/register')
+    .send({ ...REGISTRATION, captchaToken: 'x'.repeat(5000) });
+  assert.equal(tooLong.status, 400);
+});
+
+test('EMT-29: a CAPTCHA provider outage blocks registration with 503 instead of letting it through', async (t) => {
+  const { app, db } = setup({ captcha: { provider: 'turnstile', siteKey: 'k', async verify() { return { ok: false, unavailable: true }; } } });
+  t.after(() => db.close());
+  const response = await request(app).post('/api/auth/register').send(REGISTRATION);
+  assert.equal(response.status, 503);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM users').count, 0);
+});
+
+test('EMT-29: the verifier gets the token and client IP; invalid forms never reach it', async (t) => {
+  const calls = [];
+  const { app, db } = setup({
+    captcha: { provider: 'turnstile', siteKey: 'k', async verify(token, ip) { calls.push({ token, ip }); return { ok: true }; } }
+  });
+  t.after(() => db.close());
+  const invalid = await request(app).post('/api/auth/register').send({ ...REGISTRATION, email: 'not-an-email' });
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(calls, [], 'validation runs before the CAPTCHA, so a typo does not use up a one-time token');
+
+  const valid = await request(app).post('/api/auth/register').send({ ...REGISTRATION, captchaToken: ' abc ' });
+  assert.equal(valid.status, 201);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].token, 'abc');
+  assert.match(calls[0].ip, /127\.0\.0\.1/);
+});
+
+test('EMT-29: GET /api/auth/captcha-config tells the web app which widget to show', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const response = await request(app).get('/api/auth/captcha-config');
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, { provider: 'test', siteKey: 'test-site-key' });
+
+  const { app: realApp, db: realDb } = setup({ captcha: { provider: 'turnstile', siteKey: 'site-123', async verify() { return { ok: true }; } } });
+  t.after(() => realDb.close());
+  assert.deepEqual((await request(realApp).get('/api/auth/captcha-config')).body, { provider: 'turnstile', siteKey: 'site-123' });
+});
+
+test('EMT-29 AC4: after 3 failed logins for an email the next login needs a CAPTCHA token', async (t) => {
+  const { app, db } = setup({ trustProxy: 1 });
+  t.after(() => db.close());
+  await registerLoginUser(app);
+  const from = (ip, email, password, extra = {}) => request(app).post('/api/auth/login')
+    .set('X-Forwarded-For', ip).send({ email, password, ...extra });
+
+  const first = await from('198.51.100.1', 'a@x.com', 'WrongPass123');
+  const second = await from('198.51.100.1', 'a@x.com', 'WrongPass123');
+  const third = await from('198.51.100.1', 'a@x.com', 'WrongPass123');
+  assert.deepEqual([first.status, second.status, third.status], [401, 401, 401]);
+  assert.equal(first.body.captchaRequired, false);
+  assert.equal(third.body.captchaRequired, true, 'the 401 tells the web app to show the CAPTCHA');
+
+  // The email's count follows the account, not the IP: a different IP is asked for a CAPTCHA too.
+  const noToken = await from('198.51.100.2', 'A@X.com', VALID_PASSWORD);
+  assert.equal(noToken.status, 400);
+  assert.equal(noToken.body.error, 'CAPTCHA required');
+  assert.equal(noToken.body.token, undefined);
+
+  const failedCaptcha = await from('198.51.100.2', 'a@x.com', VALID_PASSWORD, { captchaToken: 'test-fail' });
+  assert.equal(failedCaptcha.status, 400);
+  assert.equal(failedCaptcha.body.token, undefined);
+
+  const passed = await from('198.51.100.2', 'a@x.com', VALID_PASSWORD, { captchaToken: CAPTCHA_PASS });
+  assert.equal(passed.status, 200, passed.text);
+  assert.ok(passed.body.token);
+
+  // Success clears the email's count, so a fresh IP is no longer asked for a CAPTCHA...
+  assert.equal((await from('198.51.100.3', 'a@x.com', VALID_PASSWORD)).status, 200);
+  // ...but the first IP keeps its own 3 failures until they expire, so success cannot be used to reset an IP.
+  assert.equal((await from('198.51.100.1', 'a@x.com', VALID_PASSWORD)).status, 400);
+});
+
+test('EMT-29: three failures from one IP across different emails also require a CAPTCHA', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await registerLoginUser(app);
+  for (const email of ['x1@example.test', 'x2@example.test', 'x3@example.test']) {
+    assert.equal((await loginAs(app, email, 'WrongPass123')).status, 401);
+  }
+  const response = await loginAs(app, 'a@x.com', VALID_PASSWORD);
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'CAPTCHA required');
+  assert.equal((await loginAs(app, 'a@x.com', VALID_PASSWORD, { captchaToken: CAPTCHA_PASS })).status, 200);
+});
+
+test('EMT-29 AC5: within the limits, login and registration behave exactly as before', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  await registerLoginUser(app);
+  assert.equal((await loginAs(app, 'a@x.com', 'WrongPass123')).status, 401);
+  assert.equal((await loginAs(app, 'a@x.com', 'WrongPass123')).status, 401);
+  const login = await loginAs(app, 'a@x.com', VALID_PASSWORD);
+  assert.equal(login.status, 200);
+  assert.deepEqual(Object.keys(login.body).sort(), ['expiresAt', 'token', 'user']);
+});
+
+test('EMT-29: with TRUST_PROXY the limiter uses the real client IP; without it, X-Forwarded-For is ignored', async (t) => {
+  const limits = { login: { windowMs: 60_000, limit: 1 } };
+  const trusted = setup({ trustProxy: 1, publicAuthRateLimitOptions: limits });
+  t.after(() => trusted.db.close());
+  const fromClient = (app, ip) => request(app).post('/api/auth/login').set('X-Forwarded-For', ip)
+    .send({ email: 'p@example.test', password: 'WrongPass123' });
+
+  assert.notEqual((await fromClient(trusted.app, '203.0.113.1')).status, 429);
+  assert.notEqual((await fromClient(trusted.app, '203.0.113.2')).status, 429, 'a different client IP has its own bucket');
+  assert.equal((await fromClient(trusted.app, '203.0.113.1')).status, 429);
+
+  const untrusted = setup({ publicAuthRateLimitOptions: limits });
+  t.after(() => untrusted.db.close());
+  assert.notEqual((await fromClient(untrusted.app, '203.0.113.1')).status, 429);
+  assert.equal((await fromClient(untrusted.app, '203.0.113.2')).status, 429, 'a spoofed header must not dodge the limit');
+});
+
 test('a role with surrounding whitespace is accepted and normalised, not a server error', async (t) => {
   const { app, db } = setup();
   t.after(() => db.close());
@@ -591,31 +791,32 @@ test('registration rejects malformed bodies and login handles invalid credential
   assert.deepEqual(malformed.body, { error: 'Malformed JSON' });
 
   await createUser(app, { email: 'login@example.test' });
-  const wrong = await request(app).post('/api/auth/login').send({
+  const login = (password, extra = {}) => request(app).post('/api/auth/login').send({
     email: 'login@example.test',
-    password: 'WrongPass123'
+    password,
+    ...extra
   });
-  assert.equal(wrong.status, 401);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    assert.equal((await request(app).post('/api/auth/login').send({
-      email: 'login@example.test',
-      password: 'WrongPass123'
-    })).status, 401);
-  }
-  const fifthFailure = await request(app).post('/api/auth/login').send({
-    email: 'login@example.test',
-    password: 'WrongPass123'
-  });
+  // Failures 1-3 need no CAPTCHA; after the third, a CAPTCHA token is required (EMT-29).
+  for (let attempt = 0; attempt < 3; attempt += 1) assert.equal((await login('WrongPass123')).status, 401);
+  assert.equal((await login('WrongPass123')).status, 400);
+  // The 4th and 5th failed attempts (with a CAPTCHA) reach the per-account lockout.
+  assert.equal((await login('WrongPass123', { captchaToken: CAPTCHA_PASS })).status, 401);
+  const fifthFailure = await login('WrongPass123', { captchaToken: CAPTCHA_PASS });
   assert.equal(fifthFailure.status, 429);
-  const locked = await request(app).post('/api/auth/login').send({
-    email: 'login@example.test',
-    password: VALID_PASSWORD
-  });
+  assert.ok(Number(fifthFailure.headers['retry-after']) > 0);
+  const locked = await login(VALID_PASSWORD, { captchaToken: CAPTCHA_PASS });
   assert.equal(locked.status, 429);
   assert.match(locked.body.error, /temporarily locked/);
+  assert.ok(Number(locked.headers['retry-after']) > 0);
 });
 
-const LOGIN_USER = { name: 'Login User', email: 'a@x.com', password: VALID_PASSWORD, role: 'Attendee' };
+const LOGIN_USER = {
+  name: 'Login User',
+  email: 'a@x.com',
+  password: VALID_PASSWORD,
+  role: 'Attendee',
+  captchaToken: CAPTCHA_PASS
+};
 
 async function registerLoginUser(app) {
   const registration = await request(app).post('/api/auth/register').send(LOGIN_USER);

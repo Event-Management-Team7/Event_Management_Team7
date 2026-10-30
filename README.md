@@ -154,6 +154,23 @@ On registration, EMRS emails a verification link built from `APP_BASE_URL`: `<AP
 - Accounts created before this feature are unverified. Resend a link to them, or run `UPDATE users SET email_verified = 1 WHERE ...` for trusted accounts.
 - Admin accounts created through `provisionUser` are verified automatically.
 
+### Rate limiting and CAPTCHA (EMT-29)
+
+- **Rate limits:** `POST /api/auth/login`, `/register` and `/resend-verification` allow 10 requests per minute per IP. Over the limit the API returns `429` with a `Retry-After` header (seconds). The per-account lockout (5 failed logins) stays, and also sends `Retry-After`.
+- **CAPTCHA:** registration always needs a valid `captchaToken` in the JSON body. Login needs one after 3 failed attempts for that email or from that IP (failures count for 15 minutes; a successful login clears the email's count but not the IP's). `400 {"error":"CAPTCHA required"}` means no token was sent and `400 {"error":"CAPTCHA verification failed"}` means the provider rejected it. Login `401`/`429` responses include `captchaRequired` so the web app knows when to show the widget. If the provider cannot be reached the API fails closed with `503`.
+- `GET /api/auth/captcha-config` returns `{ provider, siteKey }` for the web app's widget.
+
+| Variable | Purpose |
+| --- | --- |
+| `CAPTCHA_PROVIDER` | `turnstile` (Cloudflare), `recaptcha` (Google reCAPTCHA v2 checkbox) or `test` |
+| `CAPTCHA_SECRET` | Provider secret key. Server-side only; never commit it |
+| `CAPTCHA_SITE_KEY` | Provider public site key, sent to the browser |
+| `TRUST_PROXY` | Number of proxies in front of the app (for example `1` behind Docker/nginx/a load balancer) or a list of proxy addresses. Needed so the limiter sees each client's real IP; without it every client shares the proxy's address. `true` is rejected because clients could forge `X-Forwarded-For` |
+
+When `CAPTCHA_PROVIDER` is not set, development and tests use the offline `test` mode. With `NODE_ENV=production` (the Docker image) the server still starts, but registration returns `503` until CAPTCHA is configured; `test` mode is refused in production.
+
+**Test mode for automated tests:** `CAPTCHA_PROVIDER=test` needs no keys and accepts any token except the literal `test-fail`, which lets tests cover both the pass and fail paths without a network. To exercise a real provider's integration without a real challenge, use the providers' published test keys, for example Cloudflare Turnstile's always-pass pair (site key `1x00000000000000000000AA`, secret `1x0000000000000000000000000000000AA`) or always-fail pair (`2x00000000000000000000AB` / `2x0000000000000000000000000000000AA`); check the provider documentation for the current values.
+
 A successful event registration sends a plain-text confirmation with the event title, date/time, and ticket code. Waitlisted registrations do not receive a confirmed-registration email.
 
 EMT-52 tests cover SMTP configuration and mocked delivery, verification email content and token handling, registration confirmation content, waitlist behavior, and email-failure isolation. Waitlist promotion and event cancellation emails are deferred to EMT-47; password-reset emails are deferred to EMT-13.

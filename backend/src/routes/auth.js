@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { createRateLimitOptions } from '../middleware/rateLimiting.js';
+import { createRateLimitOptions, PUBLIC_AUTH_WINDOW_MS } from '../middleware/rateLimiting.js';
+import { MAX_CAPTCHA_TOKEN_LENGTH } from '../services/captcha.js';
 import { sendMailSafely } from '../services/mailer.js';
 import { isObjectBody, validateRegistration } from '../util/validation.js';
 
@@ -12,6 +13,8 @@ function buildVerificationUrl(appBaseUrl, token) {
   return url.toString();
 }
 
+// A CAPTCHA is required on login once an email or an IP has this many recent failures.
+const CAPTCHA_AFTER_FAILURES = 3;
 const RESEND_WINDOW_MS = 60 * 60 * 1000;
 const RESEND_LIMIT_PER_USER = 3;
 
@@ -20,6 +23,8 @@ export function createAuthRouter({
   authentication,
   mailer,
   appBaseUrl,
+  captcha,
+  loginFailures,
   protectedRouteRateLimitOptions,
   publicAuthRateLimitOptions = {}
 }) {
@@ -51,9 +56,37 @@ export function createAuthRouter({
     }
   }
 
+  // Returns true when the request carries a valid CAPTCHA token; otherwise sends the error response and returns false.
+  async function passesCaptcha(req, res) {
+    const token = typeof req.body.captchaToken === 'string' ? req.body.captchaToken.trim() : '';
+    if (!token) {
+      res.status(400).json({ error: 'CAPTCHA required', captchaRequired: true });
+      return false;
+    }
+    const result = token.length > MAX_CAPTCHA_TOKEN_LENGTH
+      ? { ok: false }
+      : await captcha.verify(token, req.ip);
+    if (result.unavailable) {
+      res.status(503).json({ error: 'CAPTCHA verification is unavailable. Please try again later.' });
+      return false;
+    }
+    if (!result.ok) {
+      res.status(400).json({ error: 'CAPTCHA verification failed', captchaRequired: true });
+      return false;
+    }
+    return true;
+  }
+
+  router.get('/captcha-config', rateLimit(createRateLimitOptions(
+    60,
+    { windowMs: PUBLIC_AUTH_WINDOW_MS }
+  )), (_req, res) => {
+    res.status(200).json({ provider: captcha.provider, siteKey: captcha.siteKey });
+  });
+
   router.post('/register', rateLimit(createRateLimitOptions(
-    5,
-    publicAuthRateLimitOptions.registration
+    10,
+    { windowMs: PUBLIC_AUTH_WINDOW_MS, ...publicAuthRateLimitOptions.registration }
   )), async (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
@@ -76,6 +109,7 @@ export function createAuthRouter({
       return;
     }
     try {
+      if (!(await passesCaptcha(req, res))) return;
       const user = authService.register(input);
       if (!user) {
         res.status(409).json({ error: 'Email already registered' });
@@ -110,7 +144,7 @@ export function createAuthRouter({
 
   router.post('/resend-verification', rateLimit(createRateLimitOptions(
     10,
-    publicAuthRateLimitOptions.resendVerification
+    { windowMs: PUBLIC_AUTH_WINDOW_MS, ...publicAuthRateLimitOptions.resendVerification }
   )), authentication.authenticate, rateLimit(createRateLimitOptions(
     RESEND_LIMIT_PER_USER,
     {
@@ -133,8 +167,8 @@ export function createAuthRouter({
 
   router.post('/login', rateLimit(createRateLimitOptions(
     10,
-    publicAuthRateLimitOptions.login
-  )), (req, res, next) => {
+    { windowMs: PUBLIC_AUTH_WINDOW_MS, ...publicAuthRateLimitOptions.login }
+  )), async (req, res, next) => {
     if (!isObjectBody(req.body)) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -148,18 +182,34 @@ export function createAuthRouter({
       res.status(400).json({ error: 'Validation failed', fields });
       return;
     }
+    // Failures are counted per submitted email (whether or not the account exists, so this reveals nothing) and per IP.
+    const emailKey = `email:${email.trim().toLowerCase()}`;
+    const ipKey = `ip:${req.ip}`;
+    const captchaRequired = () => (
+      loginFailures.count(emailKey) >= CAPTCHA_AFTER_FAILURES || loginFailures.count(ipKey) >= CAPTCHA_AFTER_FAILURES
+    );
     try {
+      if (captchaRequired() && !(await passesCaptcha(req, res))) return;
       const result = authService.login(email, password);
-      if (result.status === 'locked') {
-        res.status(429).json({ error: 'Too many failed attempts. Account temporarily locked.' });
-      } else if (result.status === 'invalid') {
-        res.status(401).json({ error: 'Invalid email or password.' });
-      } else {
+      if (result.status === 'ok') {
+        loginFailures.clear(emailKey);
         res.status(200).json({
           token: result.token,
           expiresAt: result.expiresAt,
           user: result.user
         });
+        return;
+      }
+      loginFailures.record(emailKey);
+      loginFailures.record(ipKey);
+      if (result.status === 'locked') {
+        res.set('Retry-After', String(result.retryAfterSeconds));
+        res.status(429).json({
+          error: 'Too many failed attempts. Account temporarily locked.',
+          captchaRequired: captchaRequired()
+        });
+      } else {
+        res.status(401).json({ error: 'Invalid email or password.', captchaRequired: captchaRequired() });
       }
     } catch (error) {
       next(error);

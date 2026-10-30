@@ -1,4 +1,6 @@
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
+// Login, registration and resend-verification allow 10 requests per minute per IP (EMT-29).
+export const PUBLIC_AUTH_WINDOW_MS = 60 * 1000;
 
 export function createRateLimitOptions(defaultLimit, options = {}) {
   return {
