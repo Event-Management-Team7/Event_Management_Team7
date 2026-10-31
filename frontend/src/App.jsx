@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, clearToken, getToken } from './api.js';
 import AuthPanel from './components/AuthPanel.jsx';
 import Message from './components/Message.jsx';
+import VerificationBanner from './components/VerificationBanner.jsx';
+import VerifyEmailPanel from './components/VerifyEmailPanel.jsx';
 import { TABS } from './tabs.js';
+import { parseVerificationToken } from './verification.js';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -11,12 +14,38 @@ export default function App() {
   const [eventCount, setEventCount] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // The verification email links to <app>/#verify-email=<token>.
+  const [verifyToken, setVerifyToken] = useState(() => parseVerificationToken(window.location.hash));
 
   const dismiss = useCallback(() => {
     setError('');
     setNotice('');
   }, []);
   const notify = useMemo(() => ({ setError, setNotice, dismiss }), [dismiss]);
+
+  useEffect(() => {
+    const onHashChange = () => setVerifyToken(parseVerificationToken(window.location.hash));
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const closeVerification = useCallback(() => {
+    // Remove the token from the address bar and history entry once it has been used.
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    setVerifyToken(null);
+  }, []);
+
+  // Re-read the signed-in user so the verification banner and gated features update right after verifying.
+  const refreshUser = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    try {
+      const result = await api('/api/auth/me', { token });
+      setUser(result.user);
+    } catch {
+      // An expired session is handled the next time the page loads.
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -95,6 +124,9 @@ export default function App() {
 
         <Message message={error} kind="error" onClose={dismiss} />
         <Message message={notice} kind="success" onClose={dismiss} />
+
+        {verifyToken && <VerifyEmailPanel token={verifyToken} user={user} onClose={closeVerification} onVerified={refreshUser} />}
+        {!verifyToken && <VerificationBanner user={user} onVerified={refreshUser} />}
 
         {!user && <AuthPanel onAuthenticated={acceptLogin} setNotice={setNotice} setError={setError} />}
 

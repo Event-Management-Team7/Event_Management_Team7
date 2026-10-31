@@ -1,3 +1,5 @@
+import { parseRetryAfter } from './retryAfter.js';
+
 const TOKEN_KEY = 'emrs_token';
 
 export function getToken() {
@@ -33,6 +35,9 @@ export async function api(path, { method = 'GET', body, token = getToken() } = {
     const error = new Error(data.error || `Request failed (${response.status})`);
     error.status = response.status;
     error.fields = data.fields || {};
+    error.code = data.code;
+    error.captchaRequired = data.captchaRequired === true;
+    error.retryAfter = parseRetryAfter(response.headers.get('Retry-After'));
     throw error;
   }
   return data;

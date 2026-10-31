@@ -124,3 +124,26 @@ button:focus-visible { outline: 3px solid #8279ee; outline-offset: 2px; }
 @media (max-width: 560px) {
   .actions button, .form-actions button, .dialog-actions button { flex: 1 1 auto; }
 }
+
+/* Email verification and CAPTCHA (EMT-32) */
+.verify-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin: 12px 0 20px; padding: 14px 16px; border: 1px solid #f1d98f; border-radius: 12px; background: #fff8e1; color: #5c4400; }
+.verify-banner-text { flex: 1 1 320px; }
+.verify-banner-text strong { display: block; margin-bottom: 2px; }
+.verify-banner-text p { margin: 0; font-size: 14px; }
+.verify-status { flex-basis: 100%; margin: 0; font-size: 14px; font-weight: 600; }
+.verify-status.ok { color: #176b49; }
+.verify-status.error { color: #a62c3a; }
+.verify-card { max-width: 520px; margin: 12px auto 28px; padding: 24px; border: 1px solid #e1e6ef; border-radius: 16px; background: white; text-align: center; }
+.verify-card h2 { margin: 0 0 8px; font-size: 22px; }
+.verify-card h2:focus { outline: none; }
+.verify-card p { margin: 0 0 14px; color: #5b657a; }
+.verify-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-bottom: 8px; }
+.captcha { margin: 6px 0 4px; min-height: 24px; }
+.captcha-test { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid #d9deea; border-radius: 9px; background: #f8f9fd; font-weight: 600; }
+.captcha-test input { width: 20px; height: 20px; margin: 0; }
+.captcha-test small { color: #7b8495; font-weight: 500; }
+@media (max-width: 560px) {
+  .verify-banner .outline, .verify-actions button { width: 100%; min-height: 44px; }
+  .verify-card { padding: 18px; }
+  .captcha { overflow-x: auto; }
+}
