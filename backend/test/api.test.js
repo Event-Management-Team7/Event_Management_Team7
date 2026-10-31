@@ -2114,3 +2114,124 @@ test('DELETE /api/events/:id applies its protected-route rate limit before authe
   assert.equal(limited.status, 429);
   assert.deepEqual(limited.body, { error: 'Too many requests, please try again later.' });
 });
+
+// ---- Sprint 2 QA (EMT-33): edge cases found by exploratory testing ----
+
+async function organizerFor(app, db, email = 'qa-organizer@example.test') {
+  const organizer = await createUser(app, { email });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  return organizer;
+}
+const registerFor = (app, eventId, user) => request(app)
+  .post(`/api/events/${eventId}/register`)
+  .set('Authorization', `Bearer ${user.token}`);
+
+test('Sprint 2 QA: cancelling an event emails confirmed and waitlisted attendees but not people who already cancelled', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const organizer = await organizerFor(app, db);
+  const event = await createEvent(app, organizer.token, { capacity: 1 });
+  const confirmed = await createUser(app, { email: 'qa-confirmed@example.test' });
+  const waitlisted = await createUser(app, { email: 'qa-waitlisted@example.test' });
+  const leaver = await createUser(app, { email: 'qa-left@example.test' });
+  const eventId = event.body.eventId;
+
+  await registerFor(app, eventId, confirmed);
+  await registerFor(app, eventId, waitlisted);
+  const leaverRegistration = await registerFor(app, eventId, leaver);
+  await request(app).delete(`/api/registrations/${leaverRegistration.body.registrationId}`)
+    .set('Authorization', `Bearer ${leaver.token}`);
+
+  messages.length = 0;
+  const cancelled = await request(app).delete(`/api/events/${eventId}`).set('Authorization', `Bearer ${organizer.token}`);
+  assert.equal(cancelled.status, 200, cancelled.text);
+  assert.deepEqual(messages.map((message) => message.to).sort(), ['qa-confirmed@example.test', 'qa-waitlisted@example.test']);
+  assert.deepEqual(db.all('SELECT status FROM registrations ORDER BY id').map((row) => row.status), ['cancelled', 'cancelled', 'cancelled']);
+});
+
+test('Sprint 2 QA: an organizer can lower capacity to exactly the confirmed count but not below it', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await organizerFor(app, db);
+  const event = await createEvent(app, organizer.token, { capacity: 5 });
+  for (const email of ['qa-a@example.test', 'qa-b@example.test']) {
+    assert.equal((await registerFor(app, event.body.eventId, await createUser(app, { email }))).status, 200);
+  }
+  assert.equal((await updateEvent(app, event.body.eventId, organizer.token, { capacity: 1 })).status, 400);
+  assert.equal((await updateEvent(app, event.body.eventId, organizer.token, { capacity: 2 })).status, 200);
+  assert.equal(db.get('SELECT capacity FROM events WHERE id = ?', [event.body.eventId]).capacity, 2);
+});
+
+test('Sprint 2 QA: the "to" date of a search includes an event that starts late that evening', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await organizerFor(app, db);
+  const late = await createEvent(app, organizer.token, { startDateTime: '2099-11-10T23:30', endDateTime: '2099-11-11T01:00' });
+  assert.equal(late.status, 201, late.text);
+  const response = await request(app).get('/api/events?from=2099-11-10&to=2099-11-10');
+  assert.deepEqual(response.body.events.map((event) => event.id), [late.body.eventId]);
+});
+
+test('Sprint 2 QA: concurrent clicks on one verification link verify once and reject the rest', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  await request(app).post('/api/auth/register').send(REGISTRATION);
+  const token = tokenFromEmail(messages[0]);
+  const responses = await Promise.all([verifyEmail(app, token), verifyEmail(app, token), verifyEmail(app, token)]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 400, 400]);
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 1);
+});
+
+// Known defects (see docs/Sprint_2_Test_Plan.md section 7). These describe the expected behaviour and are
+// marked `todo` so they are reported but do not fail the build. Remove `todo` when the defect is fixed.
+
+test('BUG-S2-01: raising an event\'s capacity promotes waitlisted attendees (EMRS-F-012)', { todo: 'defect: not implemented' }, async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await organizerFor(app, db);
+  const event = await createEvent(app, organizer.token, { capacity: 1 });
+  await registerFor(app, event.body.eventId, await createUser(app, { email: 'bug1-a@example.test' }));
+  const waitlisted = await registerFor(app, event.body.eventId, await createUser(app, { email: 'bug1-b@example.test' }));
+  assert.equal(waitlisted.body.status, 'waitlist');
+
+  assert.equal((await updateEvent(app, event.body.eventId, organizer.token, { capacity: 5 })).status, 200);
+  assert.deepEqual(db.all('SELECT status FROM registrations ORDER BY id').map((row) => row.status), ['confirmed', 'confirmed']);
+});
+
+test('BUG-S2-02: a promoted waitlisted attendee is emailed with their ticket code (EMRS-F-012, EMT-52 AC3)', { todo: 'defect: not implemented' }, async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const organizer = await organizerFor(app, db);
+  const event = await createEvent(app, organizer.token, { capacity: 1 });
+  const first = await createUser(app, { email: 'bug2-first@example.test' });
+  const second = await createUser(app, { email: 'bug2-second@example.test' });
+  const firstRegistration = await registerFor(app, event.body.eventId, first);
+  await registerFor(app, event.body.eventId, second);
+
+  messages.length = 0;
+  await request(app).delete(`/api/registrations/${firstRegistration.body.registrationId}`)
+    .set('Authorization', `Bearer ${first.token}`);
+  const ticket = db.get("SELECT ticket_code FROM registrations WHERE status = 'confirmed'").ticket_code;
+  const promotion = messages.find((message) => message.to === 'bug2-second@example.test');
+  assert.ok(promotion, 'the promoted attendee should receive an email');
+  assert.match(promotion.text, new RegExp(ticket));
+});
+
+test('BUG-S2-03: a waitlisted registration email says "waitlisted", not "confirmed" (EMT-52 AC2)', { todo: 'defect: not implemented' }, async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const organizer = await organizerFor(app, db);
+  const event = await createEvent(app, organizer.token, { capacity: 1 });
+  await registerFor(app, event.body.eventId, await createUser(app, { email: 'bug3-a@example.test' }));
+  messages.length = 0;
+  const waitlisted = await registerFor(app, event.body.eventId, await createUser(app, { email: 'bug3-b@example.test' }));
+  assert.equal(waitlisted.body.status, 'waitlist');
+  const email = messages.find((message) => message.to === 'bug3-b@example.test');
+  assert.ok(email, 'the waitlisted attendee should receive an email');
+  assert.match(email.text, /waitlisted/i);
+  assert.doesNotMatch(email.text, /is confirmed/i);
+});
