@@ -62,17 +62,17 @@ Note: the API stores a single `venue` string and `description`, so the form save
 
 | Jira Story | Test ID | Type | Description | Target Endpoint / Module | Expected Result |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **EMT-11** | `TC-REG-POS-01` | Positive | Register new Attendee/Organizer with valid fields | `POST /api/auth/register` | HTTP 201 Created; user object returned without passwordHash. |
-| **EMT-11** | `TC-REG-NEG-01` | Negative | Register with an already registered email | `POST /api/auth/register` | HTTP 409 Conflict; "An account with this email already exists." |
+| **EMT-11** | `TC-REG-POS-01` | Positive | Register new Attendee/Organizer with valid fields | `POST /api/auth/register` | HTTP 201 Created; user object returned without passwordHash. A valid `captchaToken` is required (EMT-29); a verification email is sent (EMT-28). |
+| **EMT-11** | `TC-REG-NEG-01` | Negative | Register with an already registered email | `POST /api/auth/register` | HTTP 409 Conflict; "Email already registered" (email matched case-insensitively). |
 | **EMT-11** | `TC-REG-NEG-02` | Negative | Register with invalid email format (e.g. `bademail`) | `POST /api/auth/register` | HTTP 400 Bad Request; field error on `email`. |
-| **EMT-11** | `TC-REG-NEG-03` | Negative | Register with weak password (<8 chars or no numbers) | `POST /api/auth/register` | HTTP 400 Bad Request; field error on `password`. |
+| **EMT-11** | `TC-REG-NEG-03` | Negative | Register with weak password (<8 chars, over 72 bytes, or missing an uppercase letter, a lowercase letter or a digit) | `POST /api/auth/register` | HTTP 400 Bad Request; field error on `password`. |
 | **EMT-11** | `TC-REG-NEG-04` | Negative | Register with missing required fields (empty name/email) | `POST /api/auth/register` | HTTP 400 Bad Request; field error map listing missing fields. |
 | **EMT-11** | `TC-REG-NEG-05` | Negative | Register with invalid role (e.g. `SuperUser`) | `POST /api/auth/register` | HTTP 400 Bad Request; field error on `role`. |
-| **EMT-12** | `TC-AUTH-POS-01` | Positive | Login with correct registered email and password | `POST /api/auth/login` | HTTP 200 OK; returns bearer session token and user profile. |
+| **EMT-12** | `TC-AUTH-POS-01` | Positive | Login with correct registered email and password | `POST /api/auth/login` | HTTP 200 OK; returns a signed JWT (valid 1 hour), `expiresAt` and the user profile (id, name, email, role, emailVerified). |
 | **EMT-12** | `TC-AUTH-POS-02` | Positive | Access protected endpoint (`/api/auth/me`) with valid token | `GET /api/auth/me` | HTTP 200 OK; returns authenticated user profile. |
 | **EMT-12** | `TC-AUTH-NEG-01` | Negative | Login with incorrect password for existing user | `POST /api/auth/login` | HTTP 401 Unauthorized; invalid credentials error. |
 | **EMT-12** | `TC-AUTH-NEG-02` | Negative | Login with unregistered email address | `POST /api/auth/login` | HTTP 401 Unauthorized; invalid credentials error. |
-| **EMT-12** | `TC-AUTH-NEG-05` | Negative | Repeated failed logins for one account (5 failures) | `POST /api/auth/login` | HTTP 429 Too Many Requests; "Too many failed attempts. Account temporarily locked." |
+| **EMT-12** | `TC-AUTH-NEG-05` | Negative | Repeated failed logins for one account (5 failures; a CAPTCHA token is required from the 4th attempt, EMT-29) | `POST /api/auth/login` | HTTP 429 Too Many Requests with a `Retry-After` header; "Too many failed attempts. Account temporarily locked." |
 | **EMT-12** | `TC-AUTH-NEG-03` | Negative | Access protected endpoint without Authorization token | `GET /api/auth/me` | HTTP 401 Unauthorized; "Missing authentication token". |
 | **EMT-12** | `TC-AUTH-NEG-04` | Negative | Access protected endpoint with invalid or expired token | `GET /api/auth/me` | HTTP 401 Unauthorized; "Invalid or expired session token". |
 | **EMT-14** | `TC-EVT-POS-01` | Positive | Organizer creates event with all required future details | `POST /api/events` | HTTP 201 Created; returns event ID; event stored with correct organizer. |
@@ -81,6 +81,7 @@ Note: the API stores a single `venue` string and `description`, so the form save
 | **EMT-14** | `TC-EVT-NEG-03` | Negative | Create event with past date (e.g. `2020-01-01`) | `POST /api/events` | HTTP 400 Bad Request; "Event date cannot be in the past." |
 | **EMT-14** | `TC-EVT-NEG-04` | Negative | Attendee attempts to create event | `POST /api/events` | HTTP 403 Forbidden; "Only organizers can create events." |
 | **EMT-14** | `TC-EVT-NEG-05` | Negative | Unauthenticated request to create event | `POST /api/events` | HTTP 401 Unauthorized; "Missing authentication token". |
+| **EMT-14** | `TC-EVT-NEG-06` | Negative | Organizer whose email is not verified attempts to create event (added in Sprint 2, EMT-28) | `POST /api/events` | HTTP 403 Forbidden; "Please verify your email". |
 
 ---
 
@@ -88,7 +89,7 @@ Note: the API stores a single `venue` string and `description`, so the form save
 
 ### 4.1 Entry Criteria
 1. Feature branch created adhering to naming convention (e.g., `EMT-11-user-registration`).
-2. Pull Request submitted targeting the `test` branch.
+2. Pull Request submitted targeting the `main` branch (there is no `test` branch).
 3. Node.js backend tests and React frontend build complete with no errors.
 4. Test environment and ephemeral in-memory database initialize successfully.
 
