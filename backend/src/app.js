@@ -10,7 +10,10 @@ import { AuthService } from './services/auth.js';
 import { EventService } from './services/events.js';
 import { RegistrationService } from './services/registrations.js';
 import { TicketService } from './services/tickets.js';
+import { createCaptchaVerifier } from './services/captcha.js';
+import { FailureTracker } from './services/failureTracker.js';
 import { createMailer } from './services/mailer.js';
+import { parseTrustProxy } from './util/trustProxy.js';
 
 export function createApp({
   db,
@@ -19,6 +22,9 @@ export function createApp({
   jwtSecret,
   mailer,
   appBaseUrl,
+  captcha,
+  loginFailures,
+  trustProxy,
   webDir,
   protectedRouteRateLimitOptions,
   publicAuthRateLimitOptions = {}
@@ -26,6 +32,8 @@ export function createApp({
   if (!db) throw new Error('A database instance is required');
 
   const resolvedMailer = mailer ?? createMailer();
+  const resolvedCaptcha = captcha ?? createCaptchaVerifier();
+  const resolvedLoginFailures = loginFailures ?? new FailureTracker({ clock });
   const authService = new AuthService(db, { clock, cost: passwordCost, jwtSecret });
   const eventService = new EventService(db, clock);
   const registrationService = new RegistrationService(db, clock);
@@ -34,6 +42,8 @@ export function createApp({
 
   const app = express();
   app.disable('x-powered-by');
+  // Behind Docker or a reverse proxy, rate limiting needs the real client IP (see util/trustProxy.js).
+  app.set('trust proxy', parseTrustProxy(trustProxy ?? process.env.TRUST_PROXY));
   app.use(express.json({ limit: '1mb' }));
 
   const healthHandler = (_req, res) => {
@@ -50,6 +60,8 @@ export function createApp({
     authentication,
     mailer: resolvedMailer,
     appBaseUrl: appBaseUrl ?? process.env.APP_BASE_URL,
+    captcha: resolvedCaptcha,
+    loginFailures: resolvedLoginFailures,
     protectedRouteRateLimitOptions,
     publicAuthRateLimitOptions
   }));

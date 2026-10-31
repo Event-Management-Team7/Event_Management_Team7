@@ -118,7 +118,7 @@ export class AuthService {
     // Emails are matched case-insensitively.
     email = email.trim().toLowerCase();
     const attempt = this.attempts.get(email);
-    if (attempt && attempt.lockedUntil > now) return { status: 'locked' };
+    if (attempt && attempt.lockedUntil > now) return { status: 'locked', retryAfterSeconds: attempt.lockedUntil - now };
 
     const user = this.db.get(
       'SELECT id, name, email, phone, role, email_verified, password_hash, created_at FROM users WHERE lower(email) = ?',
@@ -133,7 +133,7 @@ export class AuthService {
         current.failures = 0;
         current.lockedUntil = now + LOCK_SECONDS;
         this.attempts.set(email, current);
-        return { status: 'locked' };
+        return { status: 'locked', retryAfterSeconds: LOCK_SECONDS };
       }
       this.attempts.set(email, current);
       return { status: 'invalid' };
