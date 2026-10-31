@@ -144,7 +144,17 @@ The backend defaults to `MAIL_TRANSPORT=memory`, which keeps messages in process
 
 Keep SMTP credentials in the environment rather than committing them to source control. Configure all SMTP settings before selecting `MAIL_TRANSPORT=smtp`.
 
-On registration, EMRS sends a plain-text email asking the user to verify their email address. The link uses `APP_BASE_URL`; verification tokens are single-use and expire after 24 hours. Login does not require email verification. A successful event registration sends a plain-text confirmation with the event title, date/time, and ticket code. Waitlisted registrations do not receive a confirmed-registration email.
+#### Email verification (EMT-28)
+
+On registration, EMRS emails a verification link built from `APP_BASE_URL`: `<APP_BASE_URL>/#verify-email=<token>`. The token is in the URL fragment so it is never sent to the server or written to access logs. The page calls `POST /api/auth/verify-email` with `{ "token": "..." }`.
+
+- Tokens are random, stored only as a SHA-256 hash, valid for 24 hours and work once. An unknown, expired or used token returns `400` and changes nothing.
+- Unverified users **can sign in**, but `POST /api/events` and `POST /api/events/:id/register` return `403 {"error":"Please verify your email"}` until they verify. `GET /api/auth/me` and the login response include `emailVerified`.
+- `POST /api/auth/resend-verification` (signed-in, unverified users) issues a new link and invalidates the old one. It is limited to 3 requests per hour per user (`429` with `Retry-After`); an already verified account gets `409`.
+- Accounts created before this feature are unverified. Resend a link to them, or run `UPDATE users SET email_verified = 1 WHERE ...` for trusted accounts.
+- Admin accounts created through `provisionUser` are verified automatically.
+
+A successful event registration sends a plain-text confirmation with the event title, date/time, and ticket code. Waitlisted registrations do not receive a confirmed-registration email.
 
 EMT-52 tests cover SMTP configuration and mocked delivery, verification email content and token handling, registration confirmation content, waitlist behavior, and email-failure isolation. Waitlist promotion and event cancellation emails are deferred to EMT-47; password-reset emails are deferred to EMT-13.
 

@@ -7,6 +7,8 @@ import { createApp } from '../src/app.js';
 import { Database } from '../src/db/database.js';
 
 const FIXED_NOW = 1_800_000_000;
+// createUser() marks accounts as verified (so unrelated tests can create and register for events) using the app's db.
+const dbByApp = new WeakMap();
 const VALID_PASSWORD = 'SecurePass123';
 const JWT_SECRET = 'test-secret-for-unit-tests-only';
 const VALID_EVENT = {
@@ -38,6 +40,7 @@ function setup({
     protectedRouteRateLimitOptions,
     publicAuthRateLimitOptions
   });
+  dbByApp.set(app, db);
   return { app, db };
 }
 
@@ -53,6 +56,7 @@ function setupWithClock({ mailer, appBaseUrl = 'https://emrs.example.test' } = {
     mailer,
     appBaseUrl
   });
+  dbByApp.set(app, db);
   return { app, db, time };
 }
 
@@ -60,7 +64,18 @@ function decodePayload(token) {
   return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
 }
 
-async function createUser(app, { name = 'Test User', role = 'Attendee', email = `${role.toLowerCase()}@example.test` } = {}) {
+// The verification token is in the URL fragment of the emailed link: <base>/#verify-email=<token>.
+function tokenFromEmail(message) {
+  const link = message.text.match(/Verify your email address: (\S+)/)[1];
+  return new URL(link).hash.replace('#verify-email=', '');
+}
+
+const verifyEmail = (app, token) => request(app).post('/api/auth/verify-email').send({ token });
+
+async function createUser(
+  app,
+  { name = 'Test User', role = 'Attendee', email = `${role.toLowerCase()}@example.test`, verified = true } = {}
+) {
   const registration = await request(app).post('/api/auth/register').send({
     name,
     email,
@@ -70,6 +85,7 @@ async function createUser(app, { name = 'Test User', role = 'Attendee', email = 
   });
   assert.equal(registration.status, 201, registration.text);
   assert.equal(registration.body.user.role, 'Attendee');
+  if (verified) dbByApp.get(app).run('UPDATE users SET email_verified = 1 WHERE id = ?', [registration.body.user.id]);
 
   const login = await request(app).post('/api/auth/login').send({ email, password: VALID_PASSWORD });
   assert.equal(login.status, 200, login.text);
@@ -172,12 +188,11 @@ test('public registration, verification, and login routes use separate rate limi
 
   const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
   assert.equal(registration.status, 201);
-  const token = new URL(messages[0].text.match(/Verify your email address: (.+)/)[1])
-    .searchParams.get('token');
+  const token = tokenFromEmail(messages[0]);
 
-  const verified = await request(app).get('/api/auth/verify-email').query({ token });
+  const verified = await verifyEmail(app, token);
   assert.equal(verified.status, 200);
-  const limitedVerification = await request(app).get('/api/auth/verify-email').query({ token });
+  const limitedVerification = await verifyEmail(app, token);
   assert.equal(limitedVerification.status, 429);
 
   const login = () => request(app).post('/api/auth/login').send({
@@ -294,7 +309,7 @@ test('AC7: the stored password is a salted bcrypt hash, never the plaintext', as
   assert.notEqual(first.password_hash, second.password_hash);
 });
 
-test('registration sends a verification link while preserving immediate login', async (t) => {
+test('registration sends a verification link to the web app while preserving immediate login', async (t) => {
   const messages = [];
   const { app, db } = setup({
     mailer: { async sendMail(message) { messages.push(message); } },
@@ -303,53 +318,225 @@ test('registration sends a verification link while preserving immediate login', 
   t.after(() => db.close());
   const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
   assert.equal(registration.status, 201);
+  assert.equal(registration.body.user.emailVerified, false);
   assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].to, REGISTRATION.email);
   assert.match(messages[0].text, /verify your email address/i);
   assert.match(messages[0].text, /Event Management and Registration System \(EMRS\)/);
-  const link = messages[0].text.match(/Verify your email address: (.+)/)[1];
-  const verificationUrl = new URL(link);
+  const verificationUrl = new URL(messages[0].text.match(/Verify your email address: (\S+)/)[1]);
   assert.equal(verificationUrl.origin, 'https://events.example.test');
-  assert.equal(verificationUrl.pathname, '/api/auth/verify-email');
-  const token = verificationUrl.searchParams.get('token');
+  assert.equal(verificationUrl.pathname, '/');
+  assert.equal(verificationUrl.search, '', 'the token must not be in the query string, where servers log it');
+  const token = tokenFromEmail(messages[0]);
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
-  const storedToken = db.get('SELECT token_hash FROM email_verification_tokens').token_hash;
-  assert.notEqual(storedToken, token);
+  assert.notEqual(db.get('SELECT token_hash FROM email_verification_tokens').token_hash, token);
 
   const login = await request(app)
     .post('/api/auth/login')
     .send({ email: REGISTRATION.email, password: VALID_PASSWORD });
   assert.equal(login.status, 200);
+  assert.equal(login.body.user.emailVerified, false);
 
-  const verified = await request(app).get('/api/auth/verify-email').query({ token });
+  const verified = await verifyEmail(app, token);
   assert.equal(verified.status, 200);
   assert.equal(db.get('SELECT email_verified FROM users').email_verified, 1);
-  const reused = await request(app).get('/api/auth/verify-email').query({ token });
-  assert.equal(reused.status, 400);
+  assert.equal((await verifyEmail(app, token)).status, 400);
 });
 
-test('invalid and expired verification tokens are rejected without verifying the user', async (t) => {
+test('verification is a POST: opening the link as a plain GET never changes the account', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  await request(app).post('/api/auth/register').send(REGISTRATION);
+  const token = tokenFromEmail(messages[0]);
+
+  // Email scanners and link previewers issue GETs; they must not use up the token.
+  const get = await request(app).get('/api/auth/verify-email').query({ token });
+  assert.equal(get.status, 404);
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
+  assert.equal((await verifyEmail(app, token)).status, 200);
+});
+
+test('invalid, expired and used verification tokens return 400 and change nothing', async (t) => {
   const messages = [];
   const { app, db, time } = setupWithClock({
     mailer: { async sendMail(message) { messages.push(message); } }
   });
   t.after(() => db.close());
-  const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
-  assert.equal(registration.status, 201);
+  assert.equal((await request(app).post('/api/auth/register').send(REGISTRATION)).status, 201);
 
-  const invalid = await request(app).get('/api/auth/verify-email')
-    .query({ token: 'a'.repeat(43) });
-  assert.equal(invalid.status, 400);
+  for (const token of ['a'.repeat(43), 'short', '', undefined, 12345]) {
+    const response = await request(app).post('/api/auth/verify-email').send({ token });
+    assert.equal(response.status, 400, String(token));
+  }
+  assert.equal((await request(app).post('/api/auth/verify-email').send({})).status, 400);
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM email_verification_tokens').count, 1);
 
-  const expiredToken = new URL(messages[0].text.match(/Verify your email address: (.+)/)[1])
-    .searchParams.get('token');
+  const expiredToken = tokenFromEmail(messages[0]);
   time.now += 24 * 60 * 60;
-  const expired = await request(app).get('/api/auth/verify-email')
-    .query({ token: expiredToken });
+  const expired = await verifyEmail(app, expiredToken);
   assert.equal(expired.status, 400);
   assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
   assert.equal(db.get('SELECT COUNT(*) AS count FROM email_verification_tokens').count, 0);
+});
+
+test('a link works just before it expires', async (t) => {
+  const messages = [];
+  const { app, db, time } = setupWithClock({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  await request(app).post('/api/auth/register').send(REGISTRATION);
+  time.now += 24 * 60 * 60 - 1;
+  assert.equal((await verifyEmail(app, tokenFromEmail(messages[0]))).status, 200);
+});
+
+test('unverified users can sign in but cannot create events or register for events (403)', async (t) => {
+  const { app, db } = setup();
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const event = await createEvent(app, organizer.token);
+  assert.equal(event.status, 201, event.text);
+
+  const unverifiedOrganizer = await createUser(app, { email: 'unverified-org@example.test', verified: false });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', unverifiedOrganizer.user.id]);
+  const blockedCreate = await createEvent(app, unverifiedOrganizer.token);
+  assert.equal(blockedCreate.status, 403);
+  assert.equal(blockedCreate.body.error, 'Please verify your email');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM events').count, 1);
+
+  const unverifiedAttendee = await createUser(app, { email: 'unverified-att@example.test', verified: false });
+  const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${unverifiedAttendee.token}`);
+  assert.equal(me.status, 200);
+  assert.equal(me.body.user.emailVerified, false);
+  const blockedRegister = await request(app)
+    .post(`/api/events/${event.body.eventId}/register`)
+    .set('Authorization', `Bearer ${unverifiedAttendee.token}`);
+  assert.equal(blockedRegister.status, 403);
+  assert.equal(blockedRegister.body.error, 'Please verify your email');
+  assert.equal(db.get('SELECT COUNT(*) AS count FROM registrations').count, 0);
+});
+
+test('after verifying, creating and registering for events work as before', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const organizer = await createUser(app, { email: 'organizer@example.test' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', ['Organizer', organizer.user.id]);
+  const event = await createEvent(app, organizer.token);
+
+  const attendee = await createUser(app, { email: 'later-verified@example.test', verified: false });
+  const url = (id) => `/api/events/${id}/register`;
+  const auth = { Authorization: `Bearer ${attendee.token}` };
+  assert.equal((await request(app).post(url(event.body.eventId)).set(auth)).status, 403);
+
+  const verificationMessage = messages.find((message) => message.to === 'later-verified@example.test');
+  assert.equal((await verifyEmail(app, tokenFromEmail(verificationMessage))).status, 200);
+  const registered = await request(app).post(url(event.body.eventId)).set(auth);
+  assert.equal(registered.status, 200, registered.text);
+  assert.equal(registered.body.status, 'confirmed');
+  const me = await request(app).get('/api/auth/me').set(auth);
+  assert.equal(me.body.user.emailVerified, true);
+});
+
+test('resend requires sign-in, replaces the old link and sends a new one', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const user = await createUser(app, { email: 'resend@example.test', verified: false });
+  const auth = { Authorization: `Bearer ${user.token}` };
+  const oldToken = tokenFromEmail(messages[0]);
+
+  assert.equal((await request(app).post('/api/auth/resend-verification')).status, 401);
+  assert.equal(messages.length, 1);
+
+  const resend = await request(app).post('/api/auth/resend-verification').set(auth);
+  assert.equal(resend.status, 200);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1].to, 'resend@example.test');
+  const newToken = tokenFromEmail(messages[1]);
+  assert.notEqual(newToken, oldToken);
+  assert.equal(JSON.stringify(resend.body).includes(newToken), false);
+
+  assert.equal((await verifyEmail(app, oldToken)).status, 400, 'the old link must stop working');
+  assert.equal(db.get('SELECT email_verified FROM users').email_verified, 0);
+  assert.equal((await verifyEmail(app, newToken)).status, 200);
+});
+
+test('resend is limited to 3 per hour per user and the limit is not shared between users', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const first = await createUser(app, { email: 'first@example.test', verified: false });
+  const second = await createUser(app, { email: 'second@example.test', verified: false });
+  const resend = (user) => request(app).post('/api/auth/resend-verification')
+    .set('Authorization', `Bearer ${user.token}`);
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) assert.equal((await resend(first)).status, 200, `attempt ${attempt}`);
+  const sentBefore = messages.length;
+  const limited = await resend(first);
+  assert.equal(limited.status, 429);
+  assert.ok(Number(limited.headers['retry-after']) > 0);
+  assert.equal(messages.length, sentBefore, 'no email is sent once limited');
+  assert.equal((await resend(second)).status, 200);
+});
+
+test('resending for an already verified account returns 409 and sends nothing', async (t) => {
+  const messages = [];
+  const { app, db } = setup({ mailer: { async sendMail(message) { messages.push(message); } } });
+  t.after(() => db.close());
+  const user = await createUser(app, { email: 'done@example.test' });
+  const response = await request(app).post('/api/auth/resend-verification')
+    .set('Authorization', `Bearer ${user.token}`);
+  assert.equal(response.status, 409);
+  assert.equal(messages.filter((message) => message.subject.includes('Verify')).length, 1);
+});
+
+test('the verification token never appears in an API response or in the logs', async (t) => {
+  const messages = [];
+  const logged = [];
+  const originals = {};
+  for (const method of ['log', 'info', 'warn', 'error']) {
+    originals[method] = console[method];
+    console[method] = (...args) => logged.push(args.map(String).join(' '));
+  }
+  t.after(() => Object.assign(console, originals));
+  const { app, db } = setup({
+    mailer: { async sendMail(message) { messages.push(message); } }
+  });
+  t.after(() => db.close());
+
+  const responses = [];
+  const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
+  responses.push(registration);
+  const login = await request(app).post('/api/auth/login').send({ email: REGISTRATION.email, password: VALID_PASSWORD });
+  responses.push(login);
+  const auth = { Authorization: `Bearer ${login.body.token}` };
+  responses.push(await request(app).post('/api/auth/resend-verification').set(auth));
+  const token = tokenFromEmail(messages.at(-1));
+  responses.push(await verifyEmail(app, token));
+  responses.push(await verifyEmail(app, token));
+  responses.push(await request(app).get('/api/auth/me').set(auth));
+
+  for (const response of responses) {
+    assert.equal(response.text.includes(token), false);
+    assert.equal(JSON.stringify(response.headers).includes(token), false);
+  }
+  assert.equal(logged.join('\n').includes(token), false);
+});
+
+test('a failed verification email never fails registration or resend', async (t) => {
+  const { app, db } = setup({
+    mailer: { async sendMail() { throw new Error('smtp down'); } }
+  });
+  t.after(() => db.close());
+  const registration = await request(app).post('/api/auth/register').send(REGISTRATION);
+  assert.equal(registration.status, 201);
+  const login = await request(app).post('/api/auth/login').send({ email: REGISTRATION.email, password: VALID_PASSWORD });
+  const resend = await request(app).post('/api/auth/resend-verification')
+    .set('Authorization', `Bearer ${login.body.token}`);
+  assert.equal(resend.status, 200);
 });
 
 test('a role with surrounding whitespace is accepted and normalised, not a server error', async (t) => {

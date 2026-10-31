@@ -67,7 +67,7 @@ export function createEventsRouter({
     res.status(200).json({ events: eventService.listOrganizer(req.user.id) });
   });
 
-  router.post('/', authentication.authenticate, organizerOnly, (req, res, next) => {
+  router.post('/', authentication.authenticate, organizerOnly, authentication.requireVerifiedEmail, (req, res, next) => {
     if (req.body === undefined) {
       res.status(400).json({ error: 'Malformed JSON' });
       return;
@@ -157,7 +157,7 @@ export function createEventsRouter({
   router.post('/:id/register', rateLimit(createRateLimitOptions(
     100,
     registrationRateLimitOptions
-  )), authentication.authenticate, async (req, res, next) => {
+  )), authentication.authenticate, authentication.requireVerifiedEmail, async (req, res, next) => {
     const eventId = parsePositiveId(req.params.id);
     if (!eventId) {
       res.status(404).json({ error: 'Event not found' });

@@ -17,11 +17,12 @@ function publicUser(row) {
     email: row.email,
     phone: row.phone,
     role: row.role,
+    emailVerified: Boolean(row.email_verified),
     createdAt: row.created_at
   };
 }
 
-function createUser(db, clock, cost, { name, email, phone = '', password, role }) {
+function createUser(db, clock, cost, { name, email, phone = '', password, role, emailVerified = false }) {
   // Emails are stored trimmed and lowercase so uniqueness and login are case-insensitive.
   name = name.trim();
   email = email.trim().toLowerCase();
@@ -32,11 +33,11 @@ function createUser(db, clock, cost, { name, email, phone = '', password, role }
   try {
     const result = db.run(
       `INSERT INTO users (name, email, phone, role, password_hash, email_verified, created_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?)`,
-      [name, email, phone, role, passwordHash, createdAt]
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, email, phone, role, passwordHash, emailVerified ? 1 : 0, createdAt]
     );
     const row = db.get(
-      'SELECT id, name, email, phone, role, created_at FROM users WHERE id = ?',
+      'SELECT id, name, email, phone, role, email_verified, created_at FROM users WHERE id = ?',
       [result.lastInsertRowid]
     );
     return publicUser(row);
@@ -108,7 +109,8 @@ export class AuthService {
     if (input.role !== 'Admin') {
       throw new TypeError('Trusted provisioning requires the Admin role');
     }
-    return createUser(this.db, this.clock, this.cost, input);
+    // Accounts created by a trusted caller do not need to verify an email address.
+    return createUser(this.db, this.clock, this.cost, { ...input, emailVerified: true });
   }
 
   login(email, password) {
@@ -119,7 +121,7 @@ export class AuthService {
     if (attempt && attempt.lockedUntil > now) return { status: 'locked' };
 
     const user = this.db.get(
-      'SELECT id, name, email, phone, role, password_hash, created_at FROM users WHERE lower(email) = ?',
+      'SELECT id, name, email, phone, role, email_verified, password_hash, created_at FROM users WHERE lower(email) = ?',
       [email]
     );
     // Verify against a dummy hash for unknown emails so response time does not reveal which emails exist.
@@ -147,7 +149,13 @@ export class AuthService {
       status: 'ok',
       token,
       expiresAt,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role }
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        emailVerified: Boolean(user.email_verified)
+      }
     };
   }
 
@@ -166,7 +174,13 @@ export class AuthService {
     if (!claims) return null;
     const id = Number(claims.sub);
     if (!Number.isSafeInteger(id)) return null;
-    return this.db.get('SELECT id, name, email, phone, role FROM users WHERE id = ?', [id]) ?? null;
+    const row = this.db.get(
+      'SELECT id, name, email, phone, role, email_verified FROM users WHERE id = ?',
+      [id]
+    );
+    if (!row) return null;
+    const { email_verified: emailVerified, ...user } = row;
+    return { ...user, emailVerified: Boolean(emailVerified) };
   }
 
   // Tokens are stateless and logout is client-side (discard the token).
