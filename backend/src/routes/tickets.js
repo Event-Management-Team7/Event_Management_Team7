@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import QRCode from 'qrcode';
 import { isObjectBody } from '../util/validation.js';
 
 export function createTicketsRouter({ authService, authentication, ticketService }) {
@@ -62,6 +63,42 @@ export function createTicketsRouter({ authService, authentication, ticketService
         attendeeName: checkedIn.attendee_name,
         eventTitle: checkedIn.event_title
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/:code/qr', authentication.authenticate, async (req, res, next) => {
+    try {
+      const ticket = ticketService.getByCode(req.params.code);
+      if (!ticket) {
+        res.status(404).json({ error: 'Invalid ticket code' });
+        return;
+      }
+      if (
+        req.user.role !== 'Admin' &&
+        req.user.id !== ticket.user_id &&
+        req.user.id !== ticket.organizer_id
+      ) {
+        res.status(403).json({ error: 'Only the ticket owner or event organizer can view this QR code.' });
+        return;
+      }
+      if (
+        ticket.registration_status !== 'confirmed' ||
+        ticket.event_status === 'cancelled'
+      ) {
+        res.status(400).json({ error: 'Ticket has been cancelled or is not confirmed' });
+        return;
+      }
+      const buffer = await QRCode.toBuffer(ticket.ticket_code, {
+        errorCorrectionLevel: 'M',
+        type: 'png',
+        margin: 2,
+        width: 256
+      });
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Content-Disposition', `inline; filename="ticket-${ticket.ticket_code}.png"`);
+      res.status(200).send(buffer);
     } catch (error) {
       next(error);
     }

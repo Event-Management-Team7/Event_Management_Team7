@@ -7,7 +7,7 @@ export class TicketService {
   getByCode(code) {
     return this.db.get(
       `SELECT t.id, t.registration_id, t.ticket_code, t.qr_data, t.checked_in,
-              t.checked_in_at, r.status AS registration_status,
+              t.checked_in_at, r.status AS registration_status, r.user_id,
               e.id AS event_id, e.organizer_id, e.title AS event_title, e.status AS event_status,
               u.name AS attendee_name
        FROM tickets t
