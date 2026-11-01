@@ -14,7 +14,7 @@ Testing - Avinash Julakatti
 ## Tech Stack
 - **Backend:** Node.js & Express REST API, SQLite3 (`better-sqlite3`)
 - **Frontend:** React.js (Vite) Single-Page Application (`frontend/`)
-- **Security:** Salted bcrypt password hashing, JWT bearer tokens, parameterized SQL queries
+- **Security:** Salted bcrypt password hashing, JWT bearer tokens, parameterized SQL queries, security headers
 - **Tests & Quality:** Node.js native test runner (`node:test`) with experimental coverage, ESLint 9+ flat configuration
 - **CI/CD:** GitHub Actions (Node.js unit tests with coverage, ESLint static analysis, React production build, Docker container build and GHCR publish)
 
@@ -33,19 +33,24 @@ Testing - Avinash Julakatti
    npm install
    ```
 
-2. **Start Backend Server:**
+2. **Seed Demo Data (EMT-49):**
+   ```bash
+   npm run seed
+   ```
+
+3. **Start Backend Server:**
    ```bash
    npm run start:backend
    # Backend runs on http://localhost:8080
    ```
 
-3. **Start Frontend (Vite Dev Server):**
+4. **Start Frontend (Vite Dev Server):**
    ```bash
    npm run dev:frontend
    # Frontend runs on http://localhost:5173 (proxied to backend on 8080)
    ```
 
-4. **Build Frontend for Production:**
+5. **Build Frontend for Production:**
    ```bash
    npm run build:frontend
    ```
@@ -53,7 +58,7 @@ Testing - Avinash Julakatti
 ## Running the Tests & Quality Checks
 
 ### 1. Backend Unit, Service & API Tests (Node.js)
-Runs all 61 automated tests covering input validation, authentication, event management, registrations, waitlists, tickets, and SQLite database operations with full coverage reporting:
+Runs all automated unit, integration, and security tests covering input validation, authentication, event management, registrations, waitlists, QR tickets, reminders, and SQLite database operations with full coverage reporting:
 ```bash
 npm test
 ```
@@ -70,7 +75,9 @@ All software engineering specifications and architecture models are located in t
 - [Software Architecture Document (SAD)](docs/EMRS_SAD_v1_1_UML_Aligned.pdf)
 - [System Test Plan](docs/EMRS_Test_Plan_v1_1.pdf)
 - [Sprint 1 Test Plan (EMT-20)](docs/Sprint_1_Test_Plan.md)
+- [Sprint 2 Test Plan (EMT-33)](docs/Sprint_2_Test_Plan.md)
 - [Branch Protection & CI Quality Gates (EMT-30)](docs/BRANCH_PROTECTION.md)
+- [Non-Functional Requirements & Security Verification Report (EMT-48)](docs/NFR_Report.md)
 - [UML Component Diagram](docs/EMRS_component_diagram_updated.png)
 
 ![EMRS UML Component Diagram](docs/EMRS_component_diagram_updated.png)
@@ -86,28 +93,34 @@ Event_Management_Team7/
 ├── backend/                        # Node.js + Express backend service
 │   ├── src/
 │   │   ├── auth/                   # Passwords and crypto (bcrypt, pbkdf2)
-│   │   ├── db/                     # SQLite connection, schema & migrations
-│   │   ├── middleware/             # JWT authentication middleware
+│   │   ├── db/                     # SQLite connection, schema, migrations & seed
+│   │   ├── middleware/             # JWT authentication & rate limiting middleware
 │   │   ├── routes/                 # Express API route handlers
-│   │   ├── services/               # Business logic (Auth, Events, Registrations, Tickets)
-│   │   ├── util/                   # Input validation and sanitization
-│   │   ├── app.js                  # Express app setup and route configuration
+│   │   ├── services/               # Business logic (Auth, Events, Registrations, Tickets, Reminders)
+│   │   ├── util/                   # Input validation, sanitization & trust proxy
+│   │   ├── app.js                  # Express app setup, security headers & route configuration
 │   │   └── server.js               # Application HTTP server entry point
 │   ├── test/                       # Node.js automated test suites (node:test)
 │   │   ├── api.test.js             # End-to-end REST API & session test suite
 │   │   ├── auth-service.test.js    # Auth service & password hashing tests
+│   │   ├── captcha.test.js         # CAPTCHA verification tests
 │   │   ├── database.test.js        # SQLite schema & migration tests
 │   │   ├── event-service.test.js   # Event CRUD & access control tests
 │   │   ├── mailer.test.js          # Email notification tests
+│   │   ├── nfr-security.test.js    # NFR security & RBAC verification tests (EMT-48)
+│   │   ├── qr-tickets.test.js      # QR code ticket generation & access tests (EMT-40)
 │   │   ├── registration-service.test.js # Registration & waitlist tests
+│   │   ├── reminders.test.js       # Cancellation confirmation & reminder tests (EMT-47)
+│   │   ├── seed.test.js            # Demo data seed tests (EMT-49)
 │   │   ├── ticket-service.test.js  # Ticket & check-in tests
+│   │   ├── traceability.test.js    # Sprint 2 RTM traceability integrity tests
 │   │   └── validation.test.js      # Input validation test suite
 │   ├── package.json
 │   └── package-lock.json
 ├── frontend/                       # React.js (Vite) Single-Page Application
 │   ├── src/
-│   │   ├── components/             # Reusable UI components (AuthPanel, EventCard, EventForm, etc.)
-│   │   ├── pages/                  # Per-tab views (EventsPage, CreateEventPage, CheckInPage, etc.)
+│   │   ├── components/             # Reusable UI components (AuthPanel, EventCard, EventForm, RegistrationCard, etc.)
+│   │   ├── pages/                  # Per-tab views (EventsPage, CreateEventPage, MyRegistrationsPage, CheckInPage, etc.)
 │   │   ├── hooks/                  # Custom React hooks (useEventActions)
 │   │   ├── App.jsx                 # Main application layout
 │   │   ├── api.js                  # API client fetch wrappers
@@ -123,60 +136,92 @@ Event_Management_Team7/
 └── README.md
 ```
 
-## Docker
-Build and run the production container:
+## Production Deployment with HTTPS & Demo Data (EMT-49)
+
+### 1. Docker Build & Run
+The multi-stage `Dockerfile` produces a lightweight production container serving both the API backend and the pre-built React frontend:
 ```bash
-docker build -t emrs .
-docker run -p 8080:8080 emrs
+docker build -t emrs:latest .
+docker run -d \
+  --name emrs-app \
+  -p 8080:8080 \
+  -v emrs_data:/data \
+  -e NODE_ENV=production \
+  -e EMRS_JWT_SECRET="replace-with-a-secure-random-32char-secret" \
+  -e APP_BASE_URL="https://events.example.com" \
+  emrs:latest
 ```
-The container builds the React frontend, runs the Node.js Express server, and serves the frontend on port 8080. Health check endpoint: `GET /api/health`.
 
-### Email configuration (EMT-52)
+### 2. HTTPS & Reverse Proxy Deployment
+The SRS requires TLS 1.2 or higher for all client-server communication (EMRS-SEC-002).
+When deploying to cloud container hosts (e.g., Render, Railway, Fly.io, AWS App Runner, or an Nginx/Caddy reverse proxy):
+- The platform terminates TLS using automated host certificates (TLS 1.2+).
+- HTTP requests redirect automatically to HTTPS (`301 Moved Permanently`).
+- The application receives forwarded requests with `X-Forwarded-Proto: https`.
+- `TRUST_PROXY=1` allows the Express backend to identify real client IP addresses for rate limiting.
 
-The backend defaults to `MAIL_TRANSPORT=memory`, which keeps messages in process memory and is intended for tests and local development; it does not deliver email. Set `MAIL_TRANSPORT=smtp` to enable delivery through Nodemailer. SMTP mode requires valid configuration:
+### 3. Database Persistence & Backup
+- **Data Location:** `/data/emrs.db`
+- **Volume Mount:** Mount a named volume (`-v emrs_data:/data`) to persist users, events, and tickets across container upgrades and restarts.
+- **Backup Command:** Safe online backup using SQLite's backup API:
+  ```bash
+  docker exec emrs-app sqlite3 /data/emrs.db ".backup /data/emrs-backup-$(date +%F).db"
+  ```
 
-- `SMTP_HOST` — SMTP server host
-- `SMTP_PORT` — SMTP server port (for example, `587` or `465`)
-- `SMTP_USER` — SMTP authentication username
-- `SMTP_PASS` — SMTP authentication password
-- `MAIL_FROM` — sender address/name
-- `APP_BASE_URL` — public application base URL used to construct email verification links (for example, `https://events.example.com`, or `http://localhost:8080` for local development)
+### 4. Health Check Probe
+- **Endpoint:** `GET /api/health`
+- **Response:** `200 OK` with JSON `{ "status": "ok", "app": "...", "version": "1.0.0" }`. Suitable for Docker and Kubernetes liveness/readiness probes.
 
-Keep SMTP credentials in the environment rather than committing them to source control. Configure all SMTP settings before selecting `MAIL_TRANSPORT=smtp`.
+### 5. Demo Accounts & Seed Script
+To populate the database with initial demo accounts and sample events (free, paid, full with waitlist, cancelled, past):
+```bash
+npm run seed
+```
+**Demo Accounts Credentials:**
+| Role | Email | Password | Email Verified |
+| :--- | :--- | :--- | :--- |
+| **Admin** | `admin@emrs.test` | `AdminPassword123!` | Yes |
+| **Organizer** | `organizer@emrs.test` | `OrganizerPassword123!` | Yes |
+| **Attendee 1** | `attendee1@emrs.test` | `AttendeePassword123!` | Yes |
+| **Attendee 2** | `attendee2@emrs.test` | `AttendeePassword123!` | Yes |
 
-#### Email verification (EMT-28)
+*Note: The seed script is idempotent and can be safely re-run at any time without duplicating records.*
 
-On registration, EMRS emails a verification link built from `APP_BASE_URL`: `<APP_BASE_URL>/#verify-email=<token>`. The token is in the URL fragment so it is never sent to the server or written to access logs. The page calls `POST /api/auth/verify-email` with `{ "token": "..." }`.
+---
 
-- Tokens are random, stored only as a SHA-256 hash, valid for 24 hours and work once. An unknown, expired or used token returns `400` and changes nothing.
-- Unverified users **can sign in**, but `POST /api/events` and `POST /api/events/:id/register` return `403 {"error":"Please verify your email"}` until they verify. `GET /api/auth/me` and the login response include `emailVerified`.
-- `POST /api/auth/resend-verification` (signed-in, unverified users) issues a new link and invalidates the old one. It is limited to 3 requests per hour per user (`429` with `Retry-After`); an already verified account gets `409`.
-- Accounts created before this feature are unverified. Resend a link to them, or run `UPDATE users SET email_verified = 1 WHERE ...` for trusted accounts.
-- Admin accounts created through `provisionUser` are verified automatically.
+## Features & Services
 
-### Rate limiting and CAPTCHA (EMT-29)
+### QR Code E-Ticket Image & Display (EMT-40)
+- Confirmed registrations automatically receive an encoded QR code image.
+- `GET /api/tickets/:code/qr` generates and returns a 256x256 PNG image of the ticket QR code.
+- **Access Control:** Restricted strictly to the ticket owner, the event organizer, or an admin (403 for unauthorized users, 401 unauthenticated, 400 for cancelled tickets).
+- **Attendee Display:** The *My Registrations* tab displays the scannable QR ticket image alongside a **Download QR Code** button.
+- **Organizer Check-in:** Organizers can scan or enter the ticket code into the *Check-in* tool; admission is granted and recorded once, rejecting duplicate check-in attempts with `409 Conflict`.
 
-- **Rate limits:** `POST /api/auth/login`, `/register` and `/resend-verification` allow 10 requests per minute per IP. Over the limit the API returns `429` with a `Retry-After` header (seconds). The per-account lockout (5 failed logins) stays, and also sends `Retry-After`.
-- **CAPTCHA:** registration always needs a valid `captchaToken` in the JSON body. Login needs one after 3 failed attempts for that email or from that IP (failures count for 15 minutes; a successful login clears the email's count but not the IP's). `400 {"error":"CAPTCHA required"}` means no token was sent and `400 {"error":"CAPTCHA verification failed"}` means the provider rejected it. Login `401`/`429` responses include `captchaRequired` so the web app knows when to show the widget. If the provider cannot be reached the API fails closed with `503`.
-- `GET /api/auth/captcha-config` returns `{ provider, siteKey }` for the web app's widget.
+### Notifications & Reminders (EMT-47, EMT-52)
+- **Registration Confirmation:** Email dispatched upon ticket confirmation with event details and ticket code.
+- **Registration Cancellation:** When an attendee cancels their RSVP, an email confirmation is sent immediately.
+- **Event Reminders:** The server runs a background job checking for active events starting within the next 24 hours (e.g. 23 hours ahead). Confirmed attendees receive a reminder email exactly once (`event_reminders` tracking prevents duplicate reminders).
+- **Fault Tolerance:** Email server downtime does not fail the primary registration or cancellation actions; failures are safely logged.
 
-| Variable | Purpose |
-| --- | --- |
-| `CAPTCHA_PROVIDER` | `turnstile` (Cloudflare), `recaptcha` (Google reCAPTCHA v2 checkbox) or `test` |
-| `CAPTCHA_SECRET` | Provider secret key. Server-side only; never commit it |
-| `CAPTCHA_SITE_KEY` | Provider public site key, sent to the browser |
-| `TRUST_PROXY` | Number of proxies in front of the app (for example `1` behind Docker/nginx/a load balancer) or a list of proxy addresses. Needed so the limiter sees each client's real IP; without it every client shares the proxy's address. `true` is rejected because clients could forge `X-Forwarded-For` |
+### Email Configuration (EMT-52)
+The backend defaults to `MAIL_TRANSPORT=memory`, keeping messages in memory for tests. To use real SMTP:
+- `MAIL_TRANSPORT=smtp`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `APP_BASE_URL`
 
-When `CAPTCHA_PROVIDER` is not set, development and tests use the offline `test` mode. With `NODE_ENV=production` (the Docker image) the server still starts, but registration returns `503` until CAPTCHA is configured; `test` mode is refused in production.
+### Email Verification (EMT-28)
+- New registrations receive a one-time verification token.
+- Unverified accounts can log in, but cannot create events or register for events until verified (`403`).
+- Resend verification link is limited to 3 per hour per account.
 
-**Test mode for automated tests:** `CAPTCHA_PROVIDER=test` needs no keys and accepts any token except the literal `test-fail`, which lets tests cover both the pass and fail paths without a network. To exercise a real provider's integration without a real challenge, use the providers' published test keys, for example Cloudflare Turnstile's always-pass pair (site key `1x00000000000000000000AA`, secret `1x0000000000000000000000000000000AA`) or always-fail pair (`2x00000000000000000000AB` / `2x0000000000000000000000000000000AA`); check the provider documentation for the current values.
+### Rate Limiting & CAPTCHA (EMT-29)
+- Authentication endpoints allow 10 requests/minute per IP, returning `429 Too Many Requests` with `Retry-After`.
+- Registration requires a CAPTCHA token; login requires one after 3 failed attempts. Supported providers: `turnstile`, `recaptcha`, `test`.
 
-A successful event registration sends a plain-text confirmation with the event title, date/time, and ticket code. Waitlisted registrations do not receive a confirmed-registration email.
-
-EMT-52 tests cover SMTP configuration and mocked delivery, verification email content and token handling, registration confirmation content, waitlist behavior, and email-failure isolation. Waitlist promotion and event cancellation emails are deferred to EMT-47; password-reset emails are deferred to EMT-13.
+---
 
 ## Workflow
-1. Developer creates a feature branch per Jira story (e.g. `EMT-30-ci-cd-node-react`), with concise commits prefixed with the story key.
+1. Developer creates a feature branch per Jira story (e.g. `EMT-40-qr-code-ticket`), with concise commits prefixed with the story key.
 2. Pull requests target `main` directly.
 3. CI status checks (`Build, unit tests, coverage`, `Static analysis (JavaScript syntax & lint)`, `Docker image builds`) must pass green before merge.
 4. QA / Tester (Avinash Julakatti) and Development Lead (Dhanraj Rathod) review and approve the PR.
