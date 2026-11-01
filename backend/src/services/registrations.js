@@ -22,6 +22,25 @@ export class RegistrationService {
     this.clock = clock;
   }
 
+  getRegistrationWithEvent(registrationId) {
+    const row = this.db.get(
+      `SELECT r.id, r.user_id, r.status, e.title AS event_title,
+              e.start_datetime, e.event_date, e.start_time
+       FROM registrations r
+       JOIN events e ON e.id = r.event_id
+       WHERE r.id = ?`,
+      [registrationId]
+    );
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      status: row.status,
+      eventTitle: row.event_title,
+      eventDate: row.start_datetime || (row.start_time ? `${row.event_date}T${row.start_time}` : row.event_date)
+    };
+  }
+
   register(eventId, userId) {
     return this.db.transaction(() => {
       const event = this.db.get(

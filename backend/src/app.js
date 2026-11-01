@@ -13,6 +13,7 @@ import { TicketService } from './services/tickets.js';
 import { createCaptchaVerifier } from './services/captcha.js';
 import { FailureTracker } from './services/failureTracker.js';
 import { createMailer } from './services/mailer.js';
+import { ReminderService } from './services/reminders.js';
 import { parseTrustProxy } from './util/trustProxy.js';
 
 export function createApp({
@@ -27,7 +28,8 @@ export function createApp({
   trustProxy,
   webDir,
   protectedRouteRateLimitOptions,
-  publicAuthRateLimitOptions = {}
+  publicAuthRateLimitOptions = {},
+  enableReminderInterval = false
 } = {}) {
   if (!db) throw new Error('A database instance is required');
 
@@ -38,10 +40,24 @@ export function createApp({
   const eventService = new EventService(db, clock);
   const registrationService = new RegistrationService(db, clock);
   const ticketService = new TicketService(db, clock);
+  const reminderService = new ReminderService(db, resolvedMailer, clock);
+  if (enableReminderInterval) {
+    reminderService.start();
+  }
   const authentication = createAuthentication(authService);
 
   const app = express();
+  app.reminderService = reminderService;
   app.disable('x-powered-by');
+
+  // Security headers (EMRS-SEC-002, EMT-48)
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
   // Behind Docker or a reverse proxy, rate limiting needs the real client IP (see util/trustProxy.js).
   app.set('trust proxy', parseTrustProxy(trustProxy ?? process.env.TRUST_PROXY));
   app.use(express.json({ limit: '1mb' }));
@@ -85,6 +101,14 @@ export function createApp({
   }
   if (staticDir) {
     app.use(express.static(staticDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) return next();
+      const indexPath = path.join(staticDir, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        return res.sendFile(indexPath);
+      }
+      next();
+    });
   }
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
