@@ -11,7 +11,8 @@
     "start:backend": "npm --prefix backend start",
     "build:frontend": "npm --prefix frontend run build",
     "dev:frontend": "npm --prefix frontend run dev",
-    "test:frontend": "npm --prefix frontend test"
+    "test:frontend": "npm --prefix frontend test",
+    "seed": "npm --prefix backend run seed"
   },
   "devDependencies": {
     "eslint": "^9.13.0"
