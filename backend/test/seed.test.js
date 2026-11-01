@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import request from 'supertest';
+import { createApp } from '../src/app.js';
 import { Database } from '../src/db/database.js';
 import { seedDemoData } from '../src/db/seed.js';
 
@@ -73,4 +78,30 @@ test('EMT-49: Demo data seed script creates required accounts/events and can be 
 
   const eventsAfterSecondRun = db.all('SELECT id FROM events');
   assert.equal(eventsAfterSecondRun.length, 5);
+});
+
+test('EMT-49: Static web assets and SPA fallback with health probes', async (t) => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'emrs-web-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tempDir, 'index.html'), '<!DOCTYPE html><html><body>EMRS App</body></html>');
+  fs.writeFileSync(path.join(tempDir, 'test.txt'), 'hello static');
+
+  const app = createApp({ db, webDir: tempDir });
+
+  // 1. Health check returns 200
+  const health = await request(app).get('/api/health').expect(200);
+  assert.equal(health.body.status, 'ok');
+
+  // 2. Static file serves
+  const staticFile = await request(app).get('/test.txt').expect(200);
+  assert.equal(staticFile.text, 'hello static');
+
+  // 3. SPA fallback on non-api GET route serves index.html
+  const spa = await request(app).get('/dashboard/events').expect(200);
+  assert.match(spa.text, /EMRS App/);
+
+  // 4. API 404 does not serve index.html
+  await request(app).get('/api/nonexistent').expect(404);
 });
