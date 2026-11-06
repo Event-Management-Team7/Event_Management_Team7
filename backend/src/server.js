@@ -7,7 +7,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const db = new Database(process.env.EMRS_DB || 'emrs.db');
-const app = createApp({ db, enableReminderInterval: true });
+const app = createApp({
+  db,
+  appBaseUrl: process.env.APP_BASE_URL || `http://localhost:${port}`,
+  enableReminderInterval: true
+});
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`EMRS API listening on http://0.0.0.0:${port}`);
 });
