@@ -148,8 +148,3 @@ button:focus-visible { outline: 3px solid #8279ee; outline-offset: 2px; }
   .captcha { overflow-x: auto; }
 }
 
-/* QR code ticket display (EMT-40) */
-.qr-container { margin-top: 12px; text-align: center; }
-.ticket-qr { width: 140px; height: 140px; background: #fff; padding: 6px; border-radius: 8px; border: 1px solid #dcdfe6; display: inline-block; }
-.download-qr-btn { display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 600; color: #2e5aac; text-decoration: underline; cursor: pointer; }
-.download-qr-btn:hover { color: #1c3870; }

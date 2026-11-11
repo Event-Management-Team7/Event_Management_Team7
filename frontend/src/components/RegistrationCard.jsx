@@ -1,10 +1,6 @@
 import { formatDate } from '../utils.js';
 
 export default function RegistrationCard({ registration, onCancel }) {
-  const qrUrl = registration.ticketCode
-    ? `/api/tickets/${encodeURIComponent(registration.ticketCode)}/qr`
-    : null;
-
   return (
     <article className="card registration-card">
       <div className="event-topline">
@@ -16,25 +12,7 @@ export default function RegistrationCard({ registration, onCancel }) {
         <div className="ticket">
           <span>Ticket code</span>
           <code>{registration.ticketCode.toUpperCase()}</code>
-          <small>Show this code to an organizer for check-in.</small>
-          {registration.status === 'confirmed' && (
-            <div className="qr-container">
-              <img
-                src={qrUrl}
-                alt={`QR code for ticket ${registration.ticketCode}`}
-                className="ticket-qr"
-              />
-              <div>
-                <a
-                  href={qrUrl}
-                  download={`ticket-${registration.ticketCode}.png`}
-                  className="download-qr-btn"
-                >
-                  Download QR Code
-                </a>
-              </div>
-            </div>
-          )}
+          <small>Use this code for verification at check-in.</small>
         </div>
       ) : (
         <p>You are on the waitlist. A ticket is issued if a place becomes available.</p>
