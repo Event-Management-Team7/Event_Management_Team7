@@ -177,7 +177,7 @@ test('EventService: rejects cancellation after the event starts without changing
 
 function seedFilterEvents(db) {
   const auth = new AuthService(db, { cost: 4 });
-  const events = new EventService(db);
+  const events = new EventService(db, () => Math.floor(new Date('2026-10-01T00:00:00Z').getTime() / 1000));
   const organizer = auth.register({
     name: 'Filter Organizer',
     email: 'filters@example.com',
